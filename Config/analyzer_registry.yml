@@ -1,0 +1,79 @@
+version: 1
+
+defaults:
+  behavior_classes: []
+
+source_defaults:
+  ghostwriter:
+    behavior_classes:
+      - result_status_unreliable
+
+commands:
+  - match:
+      source: mythic
+      command_name: sleep
+    behavior_classes:
+      - expected_sleep_or_delay
+    command_duration:
+      mode: exclude_from_friction
+
+  - match:
+      command_name: /ptt
+    behavior_classes:
+      - expected_high_entropy
+    parameter_entropy:
+      min_expected: 5.5
+      max_expected: 7.0
+
+  - match:
+      command_name: pth
+    behavior_classes:
+      - expected_high_entropy
+    parameter_entropy:
+      min_expected: 4.8
+      max_expected: 7.0
+
+  - match:
+      command_name: upload
+    behavior_classes:
+      - expected_high_entropy
+      - expected_large_structured_args
+    parameter_entropy:
+      min_expected: 3.8   # observed floor from Operation Chimera dump (plain-text args ~3.88, JSON args 4.37-4.90)
+      max_expected: 5.5   # observed ceiling from structured JSON payloads (~4.90); above this may indicate binary blob
+
+  - match:
+      command_name: inject
+    behavior_classes:
+      - expected_high_entropy
+      - expected_large_structured_args
+    parameter_entropy:
+      min_expected: 5.0
+      max_expected: 7.0
+
+  - match:
+      command_name: execute-assembly
+    behavior_classes:
+      - expected_high_entropy
+      - expected_large_structured_args
+    parameter_entropy:
+      min_expected: 5.0
+      max_expected: 7.0
+
+  - match:
+      command_name: execute_coff
+    behavior_classes:
+      - expected_high_entropy
+      - expected_large_structured_args
+    argument_position_profile:
+      expected_static:
+        - position: 2
+          value: "go"
+
+  - match:
+      command_name: make_token
+    behavior_classes:
+      - expected_high_entropy
+    parameter_entropy:
+      min_expected: 3.5
+      max_expected: 6.5

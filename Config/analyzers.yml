@@ -1,0 +1,38 @@
+# Shared analyzer registry — single source of truth for both Go CLI and Python.
+# Go reads this at build/run time; Python falls back to hardcoded values if missing.
+
+analyzers:
+  summary-visualization: summary_visualization.json
+  command-failure-summary: command_failure_summary.json
+  command-retry-success: command_retry_success.json
+  command-duration: command_duration.json
+  outlier-context: outlier_context_analysis.json
+  callback-health: callback_health.json
+  av-tracker: av_tracker.json
+  dwell-time: dwell_time.json
+  parameter-entropy: parameter_entropy.json
+  argument-position-profile: argument_position_profile.json
+  tool-dump: tool_dump.json
+
+partial_load:
+  - summary-visualization
+  - command-failure-summary
+  - command-retry-success
+  - command-duration
+  - outlier-context
+  - av-tracker
+  - parameter-entropy
+  - argument-position-profile
+  - tool-dump
+
+multi_analyze:
+  - summary-visualization
+  - command-failure-summary
+  - command-retry-success
+  - command-duration
+  - outlier-context
+  - callback-health
+  - av-tracker
+  - parameter-entropy
+  - argument-position-profile
+  - tool-dump

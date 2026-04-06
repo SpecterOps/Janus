@@ -1,0 +1,150 @@
+version: 1
+
+vendors:
+  microsoft:
+    display_name: Microsoft Defender Antivirus
+    executables:
+      - MpDefenderCoreService.exe
+      - MsMpEng.exe
+      - NisSrv.exe
+      - MpCmdRun.exe
+      - ConfigSecurityPolicy.exe
+      - MpDlpService.exe
+      - MpDlpCmd.exe
+  microsoft_mde:
+    display_name: Microsoft Defender for Endpoint
+    executables:
+      - MsSense.exe
+      - SenseIR.exe
+      - SenseCM.exe
+      - SenseCE.exe
+
+  crowdstrike:
+    display_name: CrowdStrike Falcon
+    executables:
+      - CSFalconService.exe
+      - CSFalconContainer.exe
+
+  sentinelone:
+    display_name: SentinelOne
+    executables:
+      - CrAmTray.exe
+      - AmSvc.exe
+      - minionhost.exe
+      - PylumLoader.exe
+      - CrsSvc.exe
+
+  cylance:
+    display_name: BlackBerry Cylance
+    executables:
+      - CylanceUI.exe
+      - CylanceSvc.exe
+
+  tanium:
+    display_name: Tanium
+    executables:
+      - TaniumClient.exe
+      - TaniumCX.exe
+      - Tanium.exe
+
+  malwarebytes:
+    display_name: Malwarebytes
+    executables:
+      - MBAMService.exe
+      - mbamtray.exe
+
+  mcafee_trellix:
+    display_name: McAfee / Trellix Endpoint Security
+    executables:
+      - mcshield.exe
+      - Mctray.exe
+      - McScript_InUse.exe
+      - McAfeeDataBackup.exe
+
+  symantec_broadcom:
+    display_name: Symantec / Broadcom Endpoint Protection
+    executables:
+      - Smc.exe
+      - SmcGui.exe
+      - Rtvscan.exe
+      - ccSvcHst.exe
+      - SPBBCSvc.exe
+      - SAVMain.exe
+      - SAVScan.exe
+
+  trend_micro:
+    display_name: Trend Micro
+    executables:
+      - TmListen.exe
+      - tmntsrv.exe
+      - tmpfw.exe
+      - TmPfw.exe
+      - PccNTMon.exe
+
+  kaspersky:
+    display_name: Kaspersky
+    executables:
+      - avp.exe
+      - klnagent.exe
+      - kavfs.exe
+      - KAVStart.exe
+
+  eset:
+    display_name: ESET
+    executables:
+      - ekrn.exe
+      - egui.exe
+      - EHttpSrv.exe
+
+      
+  elastic:
+    display_name: Elastic Security
+    executables:
+      - elastic-endpoint.exe
+
+  bitdefender:
+    display_name: Bitdefender
+    executables:
+      - bdagent.exe
+      - vsserv.exe
+
+  fortinet:
+    display_name: Fortinet FortiClient
+    executables:
+      - FortiTray.exe
+      - FortiProxy.exe
+      - FortiWF.exe
+      - fortifw.exe
+
+  palo_alto_cortex:
+    display_name: Palo Alto Networks Cortex XDR
+    executables:
+      - redcloak.exe
+
+  sophos:
+    display_name: Sophos
+    executables:
+      - SavService.exe
+      - SAVAdminService.exe
+
+  fsecure:
+    display_name: WithSecure (F-Secure)
+    executables:
+      - fshdll32.exe
+      - fsma32.exe
+      - fsorsp.exe
+
+  avast_avg:
+    display_name: Avast / AVG
+    executables:
+      - AvastSvc.exe
+      - AvastUI.exe
+      - aswServ.exe
+      - avgnt.exe
+
+  checkpoint:
+    display_name: Check Point Harmony / ZoneAlarm
+    executables:
+      - cpf.exe
+      - zonealarm.exe
+      - zlclient.exe

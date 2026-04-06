@@ -1,0 +1,7 @@
+services:
+  janus:
+    build: .
+    image: janus:latest
+    volumes:
+      - ./Config:/config:ro
+      - ./out:/data/out

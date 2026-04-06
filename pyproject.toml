@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "janus"
+version = "1.0.0"
+description = "Turn red team and purple team operational logs into actionable intelligence"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.31.0",
+    "urllib3>=2.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.4.0"]
+
+[project.scripts]
+janus = "janus:main"
+
+[tool.setuptools]
+py-modules = ["janus"]
+
+[tool.setuptools.packages.find]
+include = ["Analyzers*", "Core*", "Parsers*", "Config*"]
+
+[tool.setuptools.package-data]
+"Config" = ["*.yml"]

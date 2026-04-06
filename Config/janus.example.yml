@@ -1,0 +1,67 @@
+output_rule: all
+arguments_rule: all
+
+# Privacy / retention notes:
+#   output_rule controls how much result output_text is persisted to events.ndjson.
+#     all          — keep all output (default)
+#     errors_only  — clear output_text on successful results; error/unknown output kept
+#     none         — clear output_text on all results regardless of status
+#
+#   arguments_rule controls how much task arguments_raw is persisted.
+#     all           — keep raw arguments verbatim (default)
+#     drop          — clear arguments_raw; only command_name and metadata are retained
+#     hash          — replace arguments_raw with a SHA-256 digest for correlation
+#     features_only — replace arguments_raw with derived features (length, shape, entropy)
+#
+#   Restricting content improves privacy but limits some analyzers.
+#   See docs/architecture.md § Privacy for the full compatibility matrix.
+
+# Optional: extra `docker run` flags when using janus-cli (host-local REST/Mythic/GW, etc.).
+# See docs/FAQ.md — Cobalt Strike REST and janus-cli + Docker.
+# Precedence for --network: CLI --docker-network > docker.network_mode > JANUS_DOCKER_RUN_EXTRA env.
+# docker:
+#   network_mode: host
+#   run_extra: ["--add-host", "host.docker.internal:host-gateway"]
+
+# Used by ./janus-cli pull and ./janus-cli run when source is mythic.
+mythic:
+  endpoint: "https://x.x.x.x:7443/graphql/"
+  api_token: ""
+  # Secure default: keep TLS verification on for HTTPS endpoints.
+  # Set to false only for local/lab deployments using self-signed certs
+  # when the Janus container/host does not trust that cert or its CA.
+  verify_tls: true
+  operation_id: 1
+
+# Used by ./janus-cli pull and ./janus-cli run when source is ghostwriter.
+ghostwriter:
+  endpoint: "https://127.0.0.1/v1/graphql"
+  # Required auth: pre-generated API key from Ghostwriter UI (Profile → API Keys)
+  # or GHOSTWRITER_API_KEY in the environment.
+  api_token: ""
+  # Secure default: keep TLS verification on for HTTPS endpoints.
+  # Set to false only for local/lab deployments using self-signed certs
+  # when the Janus container/host does not trust that cert or its CA.
+  verify_tls: true
+  oplog_id: 1
+
+# Used by ./janus-cli pull and ./janus-cli run when source is cobaltstrike.
+# Cobalt Strike 4.12+ teamserver REST API.
+# Official API overview: https://hstechdocs.helpsystems.com/manuals/cobaltstrike/current/userguide/content/api/index.html
+# Prefer REST over SSH/file extraction for structured tasks + output.
+cobaltstrike:
+  # REST base URL (no path suffix). When using janus-cli + Docker, 127.0.0.1/localhost is
+  # the Janus container, not the host; use the teamserver IP, host networking (--docker-network host
+  # on Linux), or https://host.docker.internal:PORT where Docker resolves the host.
+  rest_endpoint: "https://127.0.0.1:50050"
+  # If api_token is empty, Janus will log in with username/password and use the
+  # returned bearer token for subsequent REST calls.
+  username: ""
+  password: ""
+  # Optional: pre-issued bearer token instead of login. Store it here or pass
+  # --api-token on the CLI.
+  api_token: ""
+  duration_ms: 86400000
+  operation_id: 0
+  operation_name: ""
+  verify_tls: true

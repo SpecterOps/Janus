@@ -1,0 +1,8 @@
+version: 1
+
+groups:
+  - name: upload-commands
+    description: Dump normalized upload command invocations for external dataset training.
+    match:
+      command_names:
+        - upload
