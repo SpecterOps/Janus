@@ -55,7 +55,7 @@ On Linux, if `docker info` fails with permission denied on the Docker socket, se
 
 ## Privacy
 
-Janus runs analysis locally and does **not** use LLMs or external AI/SaaS analysis services for normalized operation data.
+Janus runs analysis locally and does **not** use LLMs or external services for normalized operation data.
 
 Retention policies (`output_rule` and `arguments_rule`) control what normalized content is written to disk. See [docs/architecture.md — Privacy](docs/architecture.md#privacy).
 
