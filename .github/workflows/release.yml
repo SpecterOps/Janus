@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cmd/janus-cli/go.mod
+          cache-dependency-path: cmd/janus-cli/go.sum
+
+      - name: Build all platforms
+        working-directory: cmd/janus-cli
+        run: |
+          mkdir -p ../../dist
+          GOOS=linux   GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ../../dist/janus-cli-linux-amd64   .
+          GOOS=linux   GOARCH=arm64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ../../dist/janus-cli-linux-arm64   .
+          GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ../../dist/janus-cli-darwin-amd64  .
+          GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ../../dist/janus-cli-darwin-arm64  .
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ../../dist/janus-cli-windows-amd64.exe .
+
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum janus-cli-* > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Janus ${{ github.ref_name }}"
+          body: |
+            ## Installation
+
+            Download the binary for your platform and place it in the repo root.
+
+            | Platform | File |
+            |---|---|
+            | Linux x86-64 | `janus-cli-linux-amd64` |
+            | Linux arm64 | `janus-cli-linux-arm64` |
+            | macOS x86-64 | `janus-cli-darwin-amd64` |
+            | macOS Apple Silicon | `janus-cli-darwin-arm64` |
+            | Windows x86-64 | `janus-cli-windows-amd64.exe` |
+
+            ```bash
+            # Linux / macOS — make executable and run
+            chmod +x janus-cli-<platform>
+            mv janus-cli-<platform> janus-cli
+            ./janus-cli run
+            ```
+
+            ```powershell
+            # Windows — rename and run
+            Rename-Item janus-cli-windows-amd64.exe janus-cli.exe
+            .\janus-cli.exe run
+            ```
+
+            Verify integrity with `checksums.txt` (SHA-256).
+          files: |
+            dist/janus-cli-linux-amd64
+            dist/janus-cli-linux-arm64
+            dist/janus-cli-darwin-amd64
+            dist/janus-cli-darwin-arm64
+            dist/janus-cli-windows-amd64.exe
+            dist/checksums.txt
+          fail_on_unmatched_files: true
+          generate_release_notes: true
