@@ -1,0 +1,15 @@
+.git
+.claude
+__pycache__
+*.pyc
+out/
+docs/
+Assets/
+*.md
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+Makefile
+dist/
+cmd/janus-cli/

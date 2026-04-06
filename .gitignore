@@ -1,0 +1,16 @@
+out/
+dist/
+
+# Compiled binaries (distributed via Releases, not committed to repo)
+janus-cli
+janus-cli.exe
+janus-cli-linux-amd64
+janus-cli-linux-arm64
+janus-cli-darwin-amd64
+janus-cli-darwin-arm64
+janus-cli-windows-amd64.exe
+
+__pycache__/
+*.pyc
+.pytest_cache/
+
