@@ -1,27 +1,7 @@
 output_rule: all
 arguments_rule: all
-
-# Privacy / retention notes:
-#   output_rule controls how much result output_text is persisted to events.ndjson.
-#     all          — keep all output (default)
-#     errors_only  — clear output_text on successful results; error/unknown output kept
-#     none         — clear output_text on all results regardless of status
-#
-#   arguments_rule controls how much task arguments_raw is persisted.
-#     all           — keep raw arguments verbatim (default)
-#     drop          — clear arguments_raw; only command_name and metadata are retained
-#     hash          — replace arguments_raw with a SHA-256 digest for correlation
-#     features_only — replace arguments_raw with derived features (length, shape, entropy)
-#
 #   Restricting content improves privacy but limits some analyzers.
 #   See docs/architecture.md § Privacy for the full compatibility matrix.
-
-# Optional: extra `docker run` flags when using janus-cli (host-local REST/Mythic/GW, etc.).
-# See docs/FAQ.md — Cobalt Strike REST and janus-cli + Docker.
-# Precedence for --network: CLI --docker-network > docker.network_mode > JANUS_DOCKER_RUN_EXTRA env.
-# docker:
-#   network_mode: host
-#   run_extra: ["--add-host", "host.docker.internal:host-gateway"]
 
 # Used by ./janus-cli pull and ./janus-cli run when source is mythic.
 mythic:
