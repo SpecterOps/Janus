@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "janus"
 version = "1.0.0"
-description = "Turn red team and purple team operational logs into actionable intelligence"
+description = "Janus analyzes C2 telemetry to surface failure patterns, operator friction, and automation opportunities across engagements."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
