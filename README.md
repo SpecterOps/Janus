@@ -6,18 +6,14 @@
 
 ## Quick Start
 
-Requires [Docker](https://www.docker.com/) and the `janus-cli` binary.
+Requires [Docker](https://www.docker.com/) and the `janus-cli` binary built for your operating system.
 
 ```bash
 git clone https://github.com/SpecterOps/Janus/ && cd Janus
 make cli
-cp Config/janus.example.yml Config/janus.yml
+cp Config/janus.example.yml Config/janus.yml # set source, redaction settings, etc. 
 ./janus-cli run
 ```
-
-On Windows, `make cli` produces `janus-cli.exe` in the repo root.
-
-On Linux, if `docker info` fails with permission denied on the Docker socket, see [docs/FAQ.md](docs/FAQ.md#docker-socket-permission-denied) (docker group and session).
 
 ## Usage
 
@@ -53,12 +49,6 @@ On Linux, if `docker info` fails with permission denied on the Docker socket, se
   </a>
 </p>
 
-## Privacy
-
-Janus runs analysis locally and does **not** use LLMs or external services for normalized operation data.
-
-Retention policies (`output_rule` and `arguments_rule`) control what normalized content is written to disk. See [docs/architecture.md — Privacy](docs/architecture.md#privacy).
-
 ## Analyzers
 
 | Analyzer | What it answers |
@@ -77,13 +67,19 @@ Retention policies (`output_rule` and `arguments_rule`) control what normalized 
 
 `parameter-entropy` works best when you tune `Config/analyzer_registry.yml` to your own workflows. The current `upload` tuning reflects our observed data and should be treated as a starting point, not a universal baseline.
 
+## Privacy
+
+Janus runs analysis locally and does **not** use LLMs or external services for normalized operation data.
+
+Retention policies (`output_rule` and `arguments_rule`) control what normalized content is written to disk. See [docs/architecture.md — Privacy](docs/architecture.md#privacy).
+
 ## Outputs
 
 - `report.html` - visual HTML report
 - `bundle.json` - versioned JSON metadata for automation and downstream tooling
 - `events.ndjson` - normalized event stream for debugging, replay, and testing
 
-For the full normalized event model and architecture notes, see [docs/architecture.md](docs/architecture.md).
+For the full normalized event model and architecture notes, see docs below.
 
 ## Docs
 
