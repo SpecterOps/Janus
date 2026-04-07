@@ -47,6 +47,7 @@ _FALLBACK_MULTI = [
     "outlier-context",
     "callback-health",
     "av-tracker",
+    "dwell-time",
     "parameter-entropy",
     "argument-position-profile",
     "tool-dump",

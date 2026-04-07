@@ -1,8 +1,8 @@
 IMAGE   := janus
 TAG     := latest
 
-# Single source of truth for semver: pyproject.toml (Python bundles + local CLI).
-JANUS_VERSION := $(shell sed -n 's/^version = "\([^"]*\)".*/\1/p' pyproject.toml | head -1)
+# Use Python so this works on Unix and Windows (no sed dependency).
+JANUS_VERSION := $(shell python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
 ifeq ($(strip $(JANUS_VERSION)),)
 $(error Could not read version from pyproject.toml)
 endif

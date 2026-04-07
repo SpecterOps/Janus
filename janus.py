@@ -538,6 +538,49 @@ def _remap_operation_id(events: list[dict], operation_id: int) -> None:
         event["operation_id"] = operation_id
 
 
+def _expand_input_pattern(pattern: str) -> list[Path]:
+    """Expand an input glob pattern with light path normalization.
+
+    On Windows, patterns ending in duplicated separators like ``out/complete//``
+    can fail to match even though the equivalent normalized directory exists.
+    We try the original pattern first, then a normalized variant, and finally
+    accept a direct directory path when the normalized form names one.
+    """
+    import glob
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add_candidate(value: str) -> None:
+        if value and value not in seen:
+            seen.add(value)
+            candidates.append(value)
+
+    add_candidate(pattern)
+
+    normalized = os.path.normpath(pattern)
+    add_candidate(normalized)
+
+    stripped = normalized.rstrip("/\\")
+    add_candidate(stripped)
+
+    matches: list[Path] = []
+    matched_paths: set[Path] = set()
+    for candidate in candidates:
+        for matched in glob.glob(candidate, recursive=True):
+            path = Path(matched)
+            if path in matched_paths:
+                continue
+            matched_paths.add(path)
+            matches.append(path)
+
+    direct_dir = Path(normalized)
+    if direct_dir.is_dir() and direct_dir not in matched_paths:
+        matches.append(direct_dir)
+
+    return [path for path in matches if path.is_dir()]
+
+
 def load_ghostwriter_raw_export(
     raw_export_path: Path,
     out_dir: Path | None = None,
@@ -2047,14 +2090,11 @@ def _cli() -> int:
         )
     elif args.command == "merge":
         # Resolve input paths from --inputs or --pattern
-        import glob
         input_paths = []
         if args.inputs:
             input_paths = args.inputs
         elif args.pattern:
-            # Expand glob pattern
-            matched = glob.glob(args.pattern, recursive=True)
-            input_paths = [Path(p) for p in matched if Path(p).is_dir()]
+            input_paths = _expand_input_pattern(args.pattern)
             if not input_paths:
                 print(f"error: no directories matched pattern: {args.pattern}", file=sys.stderr)
                 return 1
@@ -2066,14 +2106,11 @@ def _cli() -> int:
         )
     elif args.command == "multi-analyze":
         # Resolve input paths from --inputs or --pattern
-        import glob
         input_paths = []
         if args.inputs:
             input_paths = args.inputs
         elif args.pattern:
-            # Expand glob pattern
-            matched = glob.glob(args.pattern, recursive=True)
-            input_paths = [Path(p) for p in matched if Path(p).is_dir()]
+            input_paths = _expand_input_pattern(args.pattern)
             if not input_paths:
                 print(f"error: no directories matched pattern: {args.pattern}", file=sys.stderr)
                 return 1
