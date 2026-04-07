@@ -1,9 +1,8 @@
 output_rule: all
 arguments_rule: all
 #   Restricting content improves privacy but limits some analyzers.
-#   See docs/architecture.md § Privacy for the full compatibility matrix.
+#   See docs/architecture.md for the full compatibility matrix.
 
-# Used by ./janus-cli pull and ./janus-cli run when source is mythic.
 mythic:
   endpoint: "https://x.x.x.x:7443/graphql/"
   api_token: ""
@@ -13,7 +12,6 @@ mythic:
   verify_tls: true
   operation_id: 1
 
-# Used by ./janus-cli pull and ./janus-cli run when source is ghostwriter.
 ghostwriter:
   endpoint: "https://127.0.0.1/v1/graphql"
   # Required auth: pre-generated API key from Ghostwriter UI (Profile → API Keys)
@@ -25,14 +23,9 @@ ghostwriter:
   verify_tls: true
   oplog_id: 1
 
-# Used by ./janus-cli pull and ./janus-cli run when source is cobaltstrike.
 # Cobalt Strike 4.12+ teamserver REST API.
 # Official API overview: https://hstechdocs.helpsystems.com/manuals/cobaltstrike/current/userguide/content/api/index.html
-# Prefer REST over SSH/file extraction for structured tasks + output.
 cobaltstrike:
-  # REST base URL (no path suffix). When using janus-cli + Docker, 127.0.0.1/localhost is
-  # the Janus container, not the host; use the teamserver IP, host networking (--docker-network host
-  # on Linux), or https://host.docker.internal:PORT where Docker resolves the host.
   rest_endpoint: "https://127.0.0.1:50050"
   # If api_token is empty, Janus will log in with username/password and use the
   # returned bearer token for subsequent REST calls.
