@@ -155,7 +155,7 @@ Check `bundle.json` in the run directory:
 }
 ```
 
-For normal single-operation runs, `bundle.json` is the authoritative privacy record. Event-level fields such as `arguments_retained` and `output_retained` are still written on filtered events so analyzers can tell "empty by policy" from "genuinely empty", even when the original value was already blank.
+For normal single-operation runs, `bundle.json` is the authoritative privacy record. Event-level fields such as `arguments_retained` and `output_retained` are still written so analyzers can tell "empty by policy" from "genuinely empty", even when the original value was already blank. Under `output_rule: errors_only`, Janus also records `output_retained: errors_only` on result events whose output remains visible so downstream consumers can still detect the active policy when a dataset has no successful results.
 
 If you merge runs with different settings, the merged `bundle.json` records `output_rule: mixed` and/or `arguments_rule: mixed` plus `observed_output_rules` / `observed_arguments_rules` arrays listing the exact policies present. The HTML report also displays a retention policy banner in the Report Overview section when non-default or mixed policies are active.
 

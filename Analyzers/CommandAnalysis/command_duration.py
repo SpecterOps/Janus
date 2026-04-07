@@ -21,6 +21,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from Core.analyzer_behavior_registry import build_analyzer_context
+from Core.output_rule import copy_task_retention_fields
 
 # Gaps longer than 4 hours between task submission and result are almost certainly
 # overnight/session-break artefacts, not real execution time. Drop them so they
@@ -49,6 +50,7 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
             "display_id": t.get("display_id", 0),
             "processing_timestamp": t.get("processing_timestamp", ""),
             "callback_sleep_info": t.get("callback_sleep_info", ""),
+            **copy_task_retention_fields(t),
         }
 
     durations_by_command: dict[str, list[dict]] = defaultdict(list)
@@ -107,7 +109,9 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
             "operation_id": task_info["operation_id"],
             "task_id": r["task_id"],
             "display_id": task_info["display_id"],
+            "command_name": task_info["command_name"],
             "arguments_raw": task_info["arguments_raw"],
+            **copy_task_retention_fields(task_info),
         })
 
     command_stats = {}
@@ -197,8 +201,10 @@ def _compute_stats(entries: list[dict]) -> dict:
         "operation_id": max_entry.get("operation_id", 0),
         "task_id": max_entry["task_id"],
         "display_id": max_entry.get("display_id", 0),
+        "command_name": max_entry.get("command_name", ""),
         "arguments_raw": max_entry["arguments_raw"],
         "duration_seconds": round(max_entry["duration"], 2),
+        **copy_task_retention_fields(max_entry),
     }
 
     sorted_durations = sorted(durations)
@@ -219,8 +225,10 @@ def _compute_stats(entries: list[dict]) -> dict:
                 "operation_id": e.get("operation_id", 0),
                 "task_id": e["task_id"],
                 "display_id": e.get("display_id", 0),
+                "command_name": e.get("command_name", ""),
                 "arguments_raw": e["arguments_raw"],
                 "duration_seconds": round(e["duration"], 2),
+                **copy_task_retention_fields(e),
             }
             for e in sorted(outlier_entries, key=lambda e: e["duration"], reverse=True)
         ]

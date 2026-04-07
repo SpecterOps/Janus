@@ -10,6 +10,8 @@ Requires callback_id on task events (Mythic parser ≥ v0.4).
 
 from collections import defaultdict
 
+from Core.output_rule import copy_task_retention_fields
+
 CONSECUTIVE_FAILURE_THRESHOLD = 3
 
 
@@ -57,6 +59,8 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
                     "display_id": t.get("display_id", 0),
                     "command_name": t.get("command_name", ""),
                     "timestamp": t.get("timestamp", ""),
+                    "arguments_raw": t.get("arguments_raw", ""),
+                    **copy_task_retention_fields(t),
                 }
             elif status == "error":
                 error_count += 1
@@ -89,6 +93,7 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
                 "status": status,
                 "timestamp": t.get("timestamp", ""),
                 "arguments_raw": t.get("arguments_raw", ""),
+                **copy_task_retention_fields(t),
             })
         trailing_failures.reverse()
 

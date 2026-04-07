@@ -217,13 +217,77 @@ def compute_output_features(text: str) -> dict:
     }
 
 
+_ARGUMENTS_RETENTION_FIELDS = (
+    "arguments_retained",
+    "arguments_digest",
+    "arguments_present",
+    "arguments_length",
+    "arguments_token_count",
+    "arguments_shape",
+    "arguments_entropy",
+)
+
+_OUTPUT_RETENTION_FIELDS = (
+    "output_retained",
+    "output_present",
+    "output_length",
+    "output_line_count",
+)
+
+
+def _copy_prefixed_fields(
+    event: dict,
+    fields: tuple[str, ...],
+    *,
+    source_prefix: str = "",
+    dest_prefix: str = "",
+) -> dict:
+    """Return selected retention fields with optional source/destination prefixes."""
+    copied: dict = {}
+    for field in fields:
+        src_key = f"{source_prefix}{field}"
+        if src_key in event:
+            copied[f"{dest_prefix}{field}"] = event[src_key]
+    return copied
+
+
+def copy_task_retention_fields(
+    task: dict,
+    *,
+    source_prefix: str = "",
+    dest_prefix: str = "",
+) -> dict:
+    """Copy argument-retention metadata from a task-shaped event dict."""
+    return _copy_prefixed_fields(
+        task,
+        _ARGUMENTS_RETENTION_FIELDS,
+        source_prefix=source_prefix,
+        dest_prefix=dest_prefix,
+    )
+
+
+def copy_result_retention_fields(
+    result: dict,
+    *,
+    source_prefix: str = "",
+    dest_prefix: str = "",
+) -> dict:
+    """Copy output-retention metadata from a result-shaped event dict."""
+    return _copy_prefixed_fields(
+        result,
+        _OUTPUT_RETENTION_FIELDS,
+        source_prefix=source_prefix,
+        dest_prefix=dest_prefix,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Application helpers  — mutate event lists in place
 # ---------------------------------------------------------------------------
 
 
 def apply_output_rule_to_results(results: list[ResultEvent], rule: str) -> None:
-    """Mutate result events in place: drop output_text for successful results when errors_only."""
+    """Mutate result events in place according to the output retention policy."""
     r = normalize_output_rule(rule)
     if r == OUTPUT_RULE_ALL:
         return
@@ -232,10 +296,11 @@ def apply_output_rule_to_results(results: list[ResultEvent], rule: str) -> None:
             res.retention_meta["output_retained"] = OUTPUT_RULE_NONE
             res.retention_meta.update(compute_output_features(res.output_text))
             res.output_text = ""
-        elif r == OUTPUT_RULE_ERRORS_ONLY and res.status == "success":
+        elif r == OUTPUT_RULE_ERRORS_ONLY:
             res.retention_meta["output_retained"] = OUTPUT_RULE_ERRORS_ONLY
-            res.retention_meta.update(compute_output_features(res.output_text))
-            res.output_text = ""
+            if res.status == "success":
+                res.retention_meta.update(compute_output_features(res.output_text))
+                res.output_text = ""
 
 
 def apply_arguments_rule_to_tasks(

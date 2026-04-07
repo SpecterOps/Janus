@@ -44,6 +44,7 @@ from collections import Counter
 from typing import Any
 
 from Core.analyzer_behavior_registry import build_analyzer_context
+from Core.output_rule import copy_task_retention_fields
 
 # ---------------------------------------------------------------------------
 # Thresholds — can be overridden via config in the future
@@ -160,6 +161,7 @@ def _analyze_task(task: dict, context: dict[str, Any]) -> tuple[list[dict], dict
         "tool_name":     task.get("tool_name"),
         "command_name":  command_name,
         "arguments_raw": raw,
+        **copy_task_retention_fields(task),
     }
 
     if not raw:

@@ -9,6 +9,8 @@ No heuristics. No workflows. No chaining.
 
 from collections import defaultdict
 
+from Core.output_rule import copy_result_retention_fields, copy_task_retention_fields
+
 
 def _task_key(event: dict) -> tuple[int, int]:
     return (event.get("operation_id", 0), event["task_id"])
@@ -108,6 +110,8 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
                             "arguments_raw": task.get("arguments_raw", ""),
                             "error_message": error_msg,
                             "dispatch_failed": r.get("dispatch_failed", False),
+                            **copy_task_retention_fields(task),
+                            **copy_result_retention_fields(r),
                         })
 
                         # Limit to 20 failures per command to avoid JSON bloat

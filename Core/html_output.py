@@ -121,6 +121,46 @@ def _fmt_args_cell(arguments_raw: str, preview_len: int = 60, event: dict | None
     )
 
 
+def _arguments_retention_summary(event: dict | None = None, *, prefix: str = "") -> str:
+    """Return a concise plain-text summary for withheld arguments."""
+    retained = (event or {}).get(f"{prefix}arguments_retained")
+    if retained == "drop":
+        return "[arguments redacted]"
+    if retained == "hash":
+        digest = str((event or {}).get(f"{prefix}arguments_digest", "") or "")
+        short = digest[:20] + "..." if len(digest) > 20 else digest
+        return f"[args hash: {short}]" if short else "[args hash]"
+    if retained == "features_only":
+        shape = str((event or {}).get(f"{prefix}arguments_shape", "") or "")
+        length = (event or {}).get(f"{prefix}arguments_length", 0)
+        summary = f"{shape}, {length} chars" if shape else f"{length} chars"
+        return f"[args features: {summary}]"
+    return ""
+
+
+def _output_retention_summary(event: dict | None = None, *, prefix: str = "") -> str:
+    """Return a concise plain-text summary for withheld output."""
+    retained = (event or {}).get(f"{prefix}output_retained")
+    status = str((event or {}).get("status", "") or "")
+    if retained == "none":
+        base = "output withheld by retention policy (none)"
+    elif retained == "errors_only" and status == "success":
+        base = "successful output withheld by retention policy (errors_only)"
+    else:
+        return ""
+
+    length = (event or {}).get(f"{prefix}output_length")
+    line_count = (event or {}).get(f"{prefix}output_line_count")
+    details: list[str] = []
+    if isinstance(length, int):
+        details.append(f"{length} chars")
+    if isinstance(line_count, int) and line_count > 0:
+        details.append(f"{line_count} line{'s' if line_count != 1 else ''}")
+    if details:
+        return f"{base}; {', '.join(details)}"
+    return base
+
+
 def _wrap_cell_text(value: object, *, use_code: bool = False) -> str:
     """Render long table text with a marker class so it can wrap cleanly."""
     escaped = html.escape("" if value is None else str(value))
@@ -1057,7 +1097,11 @@ def _render_command_failure_summary(data: dict, callback_data: dict[str, dict] |
                 cb_ref = _cb_link(mythic_base_url, str(f.get("callback_id", "")), f.get("callback_display_id") or None)
 
                 # Format full command with arguments
-                full_command = _format_full_command(f.get("command_name", ""), f.get("arguments_raw", ""))
+                full_command = _format_full_command(
+                    f.get("command_name", ""),
+                    f.get("arguments_raw", ""),
+                    event=f,
+                )
 
                 # Decode base64 error message
                 error_msg_raw = f.get("error_message", "")
@@ -1069,7 +1113,19 @@ def _render_command_failure_summary(data: dict, callback_data: dict[str, dict] |
 
                 # Format error output with line breaks
                 if len(error_lines) == 0:
-                    error_display = '<em>(no output)</em>'
+                    retained_output = _output_retention_summary(f)
+                    if retained_output:
+                        escaped_retained_output = html.escape(retained_output)
+                        error_display = (
+                            f'<div class="error-output"><em class="privacy-filtered">'
+                            f"{escaped_retained_output}</em></div>"
+                        )
+                        error_full_html = (
+                            f'<em class="privacy-filtered">{escaped_retained_output}</em>'
+                        )
+                    else:
+                        error_display = '<em>(no output)</em>'
+                        error_full_html = '<em>(no output)</em>'
                 elif len(error_lines) == 1:
                     # Single line - show inline
                     line = error_lines[0]
@@ -1077,6 +1133,7 @@ def _render_command_failure_summary(data: dict, callback_data: dict[str, dict] |
                         error_display = f'<div class="error-output">{html.escape(line[:150])}...<br><em>(see full output below)</em></div>'
                     else:
                         error_display = f'<div class="error-output">{html.escape(line)}</div>'
+                    error_full_html = '<br>'.join(html.escape(line) for line in error_lines)
                 else:
                     # Multi-line - show first 10 lines
                     preview_lines = error_lines[:10]
@@ -1084,9 +1141,7 @@ def _render_command_failure_summary(data: dict, callback_data: dict[str, dict] |
                     if len(error_lines) > 10:
                         preview_html += f'<br><em>(+{len(error_lines) - 10} more lines)</em>'
                     error_display = f'<div class="error-output">{preview_html}</div>'
-
-                # Full error in details section
-                error_full_html = '<br>'.join(html.escape(line) for line in error_lines)
+                    error_full_html = '<br>'.join(html.escape(line) for line in error_lines)
 
                 # Mark dispatch failures
                 dispatch_badge = ' <span class="status-error">[dispatch]</span>' if f.get("dispatch_failed") else ""
@@ -1184,7 +1239,7 @@ def _format_attempt_detail(index: int, attempt: dict, mythic_base_url: str = "",
     # Use provided command_name or fallback to attempt's command_name field
     cmd = command_name or attempt.get("command_name", "")
     args_raw = attempt.get("arguments_raw", "")
-    full_command = _format_full_command(cmd, args_raw)
+    full_command = _format_full_command(cmd, args_raw, event=attempt)
     task_ref = _task_link(mythic_base_url, tid, did)
     ts_display = _ts_html(ts) if ts else ""
     change_hint = ""
@@ -1194,12 +1249,22 @@ def _format_attempt_detail(index: int, attempt: dict, mythic_base_url: str = "",
     return f"<li>Attempt {index + 1} ({task_ref}): <code>{html.escape(full_command)}</code>{status_badge}{change_hint} &mdash; {ts_display}</li>"
 
 
-def _format_full_command(command_name: str, arguments_raw: str, max_length: int = 120) -> str:
+def _format_full_command(
+    command_name: str,
+    arguments_raw: str,
+    max_length: int = 120,
+    *,
+    event: dict | None = None,
+    prefix: str = "",
+) -> str:
     """Format command with arguments as it would appear in Mythic.
 
     Returns a string like 'ls \\\\path\\to\\dir' or 'execute_coff MyBOF arg1=val1'
     """
     if not arguments_raw:
+        retained_summary = _arguments_retention_summary(event, prefix=prefix)
+        if retained_summary:
+            return f"{command_name} {retained_summary}".strip()
         # Commands that typically require arguments - flag when missing
         commands_needing_args = {
             "execute_coff", "execute_assembly", "inline_assembly", "ls", "cd",
@@ -1401,7 +1466,11 @@ def _render_command_retry_success(data: dict, mythic_base_url: str = "") -> str:
                 status = cmd.get("status", "unknown")
                 status_badge = f' <span class="status-{status}">({status})</span>' if status else ""
                 command_name = cmd.get("command_name", "")
-                full_command = _format_full_command(command_name, cmd.get("arguments_raw", ""))
+                full_command = _format_full_command(
+                    command_name,
+                    cmd.get("arguments_raw", ""),
+                    event=cmd,
+                )
 
                 # Highlight certain "fix" commands that are likely relevant
                 highlight_commands = {"rev2self", "make_token", "steal_token", "getprivs", "getsystem"}
@@ -1476,7 +1545,12 @@ def _render_task_context(task_id: int, outlier_context_map: dict, mythic_base_ur
     # Helper to format a context item
     def _fmt_ctx_item(c: dict) -> str:
         dur = f", {c['duration_seconds']:.2f}s" if c.get("duration_seconds") is not None else ""
-        full_command = _format_full_command(c['command_name'], c.get('arguments_raw', ''), max_length=80)
+        full_command = _format_full_command(
+            c['command_name'],
+            c.get('arguments_raw', ''),
+            max_length=80,
+            event=c,
+        )
         return f"<code>{html.escape(full_command)}</code> ({_task_link(mythic_base_url, c['task_id'], c.get('display_id') or None)}{dur})"
 
     # Build context HTML
@@ -1612,7 +1686,11 @@ def _render_command_duration(data: dict, mythic_base_url: str = "", outlier_cont
             for evt in outlier_events:
                 task_id = evt['task_id']
                 duration = evt['duration_seconds']
-                full_command = _format_full_command(evt.get('command_name', ''), evt.get('arguments_raw', ''))
+                full_command = _format_full_command(
+                    evt.get('command_name', ''),
+                    evt.get('arguments_raw', ''),
+                    event=evt,
+                )
 
                 # Add context if available
                 context_html = _render_task_context(task_id, outlier_context_map, mythic_base_url)
@@ -1634,7 +1712,12 @@ def _render_command_duration(data: dict, mythic_base_url: str = "", outlier_cont
         # Build max event details
         max_event = stats.get("max_event") or {}
         # Format full command with arguments
-        full_command = _format_full_command(max_event.get('command_name', cmd_name), max_event.get('arguments_raw', ''), max_length=150)
+        full_command = _format_full_command(
+            max_event.get('command_name', cmd_name),
+            max_event.get('arguments_raw', ''),
+            max_length=150,
+            event=max_event,
+        )
         task_id = max_event.get('task_id', 'N/A')
         display_id = max_event.get('display_id') or None
         duration_seconds = max_event.get('duration_seconds', 0)
@@ -1750,7 +1833,12 @@ def _render_outlier_context(data: dict, mythic_base_url: str = "") -> str:
 
         def _fmt_ctx_item(c: dict) -> str:
             dur = f", {c['duration_seconds']:.2f}s" if c.get("duration_seconds") is not None else ""
-            full_command = _format_full_command(c['command_name'], c.get('arguments_raw', ''), max_length=80)
+            full_command = _format_full_command(
+                c['command_name'],
+                c.get('arguments_raw', ''),
+                max_length=80,
+                event=c,
+            )
             return f"<code>{html.escape(full_command)}</code> ({_task_link(mythic_base_url, c['task_id'], c.get('display_id') or None)}{dur})"
 
         preceding_items = "".join(
@@ -1880,7 +1968,11 @@ def _render_callback_health(data: dict, mythic_base_url: str = "") -> str:
             shown = trailing[:inline_limit]
             trailing_items = []
             for tf in shown:
-                full_command = _format_full_command(tf.get("command_name", ""), tf.get("arguments_raw", ""))
+                full_command = _format_full_command(
+                    tf.get("command_name", ""),
+                    tf.get("arguments_raw", ""),
+                    event=tf,
+                )
                 trailing_items.append(
                     f"<li>{_task_link(mythic_base_url, tf['task_id'], tf.get('display_id') or None)}: "
                     f"<code>{html.escape(full_command)}</code>"
@@ -1889,7 +1981,11 @@ def _render_callback_health(data: dict, mythic_base_url: str = "") -> str:
                 )
             all_trailing_items = list(trailing_items)
             for tf in trailing[inline_limit:]:
-                full_command = _format_full_command(tf.get("command_name", ""), tf.get("arguments_raw", ""))
+                full_command = _format_full_command(
+                    tf.get("command_name", ""),
+                    tf.get("arguments_raw", ""),
+                    event=tf,
+                )
                 all_trailing_items.append(
                     f"<li>{_task_link(mythic_base_url, tf['task_id'], tf.get('display_id') or None)}: "
                     f"<code>{html.escape(full_command)}</code>"
@@ -1907,7 +2003,11 @@ def _render_callback_health(data: dict, mythic_base_url: str = "") -> str:
 
         # Build last success display
         if last_success:
-            full_command = _format_full_command(last_success.get('command_name', ''), last_success.get('arguments_raw', ''))
+            full_command = _format_full_command(
+                last_success.get('command_name', ''),
+                last_success.get('arguments_raw', ''),
+                event=last_success,
+            )
             last_success_html = (
                 f"{_task_link(mythic_base_url, last_success['task_id'], last_success.get('display_id') or None)}: "
                 f"<code>{html.escape(full_command)}</code>"
@@ -2101,8 +2201,20 @@ def _render_dwell_time(data: dict, mythic_base_url: str = "") -> str:
 
     rows = []
     for outlier in outliers:
-        from_cmd = _format_full_command(outlier.get("from_command", ""), outlier.get("from_arguments_raw", ""), max_length=120)
-        to_cmd = _format_full_command(outlier.get("to_command", ""), outlier.get("to_arguments_raw", ""), max_length=120)
+        from_cmd = _format_full_command(
+            outlier.get("from_command", ""),
+            outlier.get("from_arguments_raw", ""),
+            max_length=120,
+            event=outlier,
+            prefix="from_",
+        )
+        to_cmd = _format_full_command(
+            outlier.get("to_command", ""),
+            outlier.get("to_arguments_raw", ""),
+            max_length=120,
+            event=outlier,
+            prefix="to_",
+        )
         rows.append(f"""
         <tr>
             <td>{_task_link(mythic_base_url, outlier.get('from_task_id', '?'), outlier.get('from_display_id') or None)}</td>

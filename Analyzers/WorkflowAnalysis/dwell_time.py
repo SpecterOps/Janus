@@ -13,6 +13,8 @@ import statistics
 from collections import defaultdict
 from datetime import datetime
 
+from Core.output_rule import copy_task_retention_fields
+
 
 def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
     """Calculate dwell time statistics between consecutive operator commands.
@@ -61,11 +63,13 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
                 "from_command": from_task["command_name"],
                 "from_timestamp": from_task["timestamp"],
                 "from_arguments_raw": from_task.get("arguments_raw", ""),
+                **copy_task_retention_fields(from_task, dest_prefix="from_"),
                 "to_task_id": to_task["task_id"],
                 "to_display_id": to_task.get("display_id", 0),
                 "to_command": to_task["command_name"],
                 "to_timestamp": to_task["timestamp"],
                 "to_arguments_raw": to_task.get("arguments_raw", ""),
+                **copy_task_retention_fields(to_task, dest_prefix="to_"),
                 "dwell_seconds": dwell_seconds,
             })
 
@@ -171,11 +175,13 @@ def _compute_statistics(dwells: list[dict]) -> dict:
                 "from_command": d["from_command"],
                 "from_timestamp": d["from_timestamp"],
                 "from_arguments_raw": d["from_arguments_raw"],
+                **copy_task_retention_fields(d, source_prefix="from_", dest_prefix="from_"),
                 "to_task_id": d["to_task_id"],
                 "to_display_id": d["to_display_id"],
                 "to_command": d["to_command"],
                 "to_timestamp": d["to_timestamp"],
                 "to_arguments_raw": d["to_arguments_raw"],
+                **copy_task_retention_fields(d, source_prefix="to_", dest_prefix="to_"),
                 "dwell_seconds": round(d["dwell_seconds"], 2),
             }
             for d in outlier_dwells

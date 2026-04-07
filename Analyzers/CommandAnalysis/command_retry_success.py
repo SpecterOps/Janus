@@ -13,6 +13,8 @@ import json
 from collections import defaultdict
 from datetime import datetime
 
+from Core.output_rule import copy_task_retention_fields
+
 
 def _task_key(event: dict) -> tuple[int, int]:
     return (event.get("operation_id", 0), event["task_id"])
@@ -313,6 +315,7 @@ def _analyze_sequence(
             "timestamp": task["timestamp"],
             "status": status,
             "arguments_raw": task.get("arguments_raw", ""),
+            **copy_task_retention_fields(task),
         })
 
     # Calculate time span
@@ -366,6 +369,7 @@ def _analyze_sequence(
                         "timestamp": task_time,
                         "status": status,
                         "arguments_raw": t.get("arguments_raw", ""),
+                        **copy_task_retention_fields(t),
                     })
 
         # Sort by timestamp

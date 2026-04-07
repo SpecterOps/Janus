@@ -15,6 +15,8 @@ from typing import Any
 
 import yaml
 
+from Core.output_rule import copy_task_retention_fields
+
 
 REGISTRY_VERSION = 1
 
@@ -212,6 +214,7 @@ def analyze(
                 "issued_command_name": task.get("issued_command_name", ""),
                 "arguments_raw": task.get("arguments_raw", ""),
                 "full_command": full_command,
+                **copy_task_retention_fields(task),
             }
             matches.append(entry)
             dump_lines.append(full_command)
