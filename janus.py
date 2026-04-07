@@ -608,7 +608,29 @@ def load_ghostwriter_raw_export(
     events_path = output_dir / "events.ndjson"
     bundle_path = output_dir / "bundle.json"
 
-    policy = resolve_retention_policy(config or {}, output_rule_cli, arguments_rule_cli)
+    existing_bundle = {}
+    if bundle_path.exists():
+        try:
+            with bundle_path.open(encoding="utf-8") as f:
+                existing_bundle = json.load(f)
+        except Exception:
+            existing_bundle = {}
+
+    effective_config = dict(config or {})
+    if (
+        output_rule_cli is None
+        and "output_rule" not in effective_config
+        and existing_bundle.get("output_rule")
+    ):
+        effective_config["output_rule"] = existing_bundle["output_rule"]
+    if (
+        arguments_rule_cli is None
+        and "arguments_rule" not in effective_config
+        and existing_bundle.get("arguments_rule")
+    ):
+        effective_config["arguments_rule"] = existing_bundle["arguments_rule"]
+
+    policy = resolve_retention_policy(effective_config, output_rule_cli, arguments_rule_cli)
     apply_retention_policy(task_events, result_events, policy)
 
     all_events = [e.to_dict() for e in task_events] + [e.to_dict() for e in result_events]
@@ -617,14 +639,6 @@ def load_ghostwriter_raw_export(
     status_counts = {"success": 0, "error": 0, "unknown": 0}
     for event in result_events:
         status_counts[event.status] += 1
-
-    existing_bundle = {}
-    if bundle_path.exists():
-        try:
-            with bundle_path.open(encoding="utf-8") as f:
-                existing_bundle = json.load(f)
-        except Exception:
-            existing_bundle = {}
 
     op_name = raw_export.get("oplog_name") or existing_bundle.get("operation_name") or f"oplog-{raw_export.get('oplog_id', 0)}"
     metadata = {
@@ -664,8 +678,49 @@ def run_analyze(
     if not events_path.exists():
         raw_export_path = events_path.parent / "raw_export.json"
         if raw_export_path.exists():
-            print(f"events.ndjson missing; normalizing existing Ghostwriter export from {raw_export_path}")
-            rc = load_ghostwriter_raw_export(raw_export_path, out_dir=events_path.parent)
+            bundle_path = events_path.parent / "bundle.json"
+            bundle_metadata = {}
+            if bundle_path.exists():
+                try:
+                    with bundle_path.open(encoding="utf-8") as f:
+                        bundle_metadata = json.load(f)
+                except Exception:
+                    bundle_metadata = {}
+
+            output_rule = bundle_metadata.get("output_rule")
+            arguments_rule = bundle_metadata.get("arguments_rule")
+            if not output_rule or not arguments_rule:
+                print(
+                    "error: events.ndjson is missing and raw_export.json is available, "
+                    "but the original retention policy cannot be recovered safely.",
+                    file=sys.stderr,
+                )
+                print(
+                    "hint: raw_export.json is the unfiltered Ghostwriter source snapshot used for "
+                    "later re-normalization. To avoid silently regenerating less-restricted events, "
+                    "Janus requires the recorded output_rule and arguments_rule before auto-rebuild.",
+                    file=sys.stderr,
+                )
+                print(
+                    "hint: re-run `ghostwriter-load` with an explicit config or "
+                    "`--output-rule/--arguments-rule`, or restore the original bundle.json.",
+                    file=sys.stderr,
+                )
+                return 1
+
+            print(
+                "events.ndjson missing; re-normalizing existing Ghostwriter export "
+                f"from {raw_export_path} using recorded retention "
+                f"(output_rule={output_rule}, arguments_rule={arguments_rule})"
+            )
+            rc = load_ghostwriter_raw_export(
+                raw_export_path,
+                out_dir=events_path.parent,
+                config={
+                    "output_rule": output_rule,
+                    "arguments_rule": arguments_rule,
+                },
+            )
             if rc != 0:
                 return rc
         else:

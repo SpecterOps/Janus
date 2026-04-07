@@ -178,6 +178,54 @@ def _format_retention_rule_list(rules: object) -> str:
     return ", ".join(f"<code>{value}</code>" for value in values)
 
 
+def _retention_metadata_from_analysis(analysis_data: dict) -> dict | None:
+    """Best-effort retention summary derived from analyzer metadata."""
+    observed_args_rules: set[str] = set()
+    observed_output_rules: set[str] = set()
+
+    for payload in analysis_data.values():
+        if not isinstance(payload, dict):
+            continue
+        metadata = payload.get("metadata", {})
+        if not isinstance(metadata, dict):
+            continue
+        retention = metadata.get("retention", {})
+        if not isinstance(retention, dict):
+            continue
+
+        args_rule = retention.get("arguments_retained")
+        out_rule = retention.get("output_retained")
+        if args_rule:
+            observed_args_rules.add(str(args_rule))
+        if out_rule:
+            observed_output_rules.add(str(out_rule))
+
+        for rule in retention.get("observed_arguments_rules", []):
+            if rule:
+                observed_args_rules.add(str(rule))
+        for rule in retention.get("observed_output_rules", []):
+            if rule:
+                observed_output_rules.add(str(rule))
+
+    if not observed_args_rules and not observed_output_rules:
+        return None
+
+    def _canonical(observed: set[str]) -> str:
+        if not observed:
+            return "all"
+        if len(observed) > 1:
+            return "mixed"
+        return next(iter(observed))
+
+    return {
+        "arguments_rule": _canonical(observed_args_rules),
+        "output_rule": _canonical(observed_output_rules),
+        "observed_arguments_rules": sorted(observed_args_rules),
+        "observed_output_rules": sorted(observed_output_rules),
+        "_derived_from_analyzers": True,
+    }
+
+
 def _mythic_base_url(endpoint: str) -> str:
     """Strip trailing path (e.g. /graphql) from the Mythic endpoint to get the UI base URL."""
     if not endpoint:
@@ -708,11 +756,25 @@ def _render_report_header(
 
     # --- Privacy/retention banner ---
     privacy_html = ""
-    if metadata:
-        args_rule = metadata.get("arguments_rule", "all")
-        out_rule = metadata.get("output_rule", "all")
-        observed_args_rules = metadata.get("observed_arguments_rules", [])
-        observed_output_rules = metadata.get("observed_output_rules", [])
+    retention_metadata = dict(metadata or {})
+    derived_retention = _retention_metadata_from_analysis(analysis_data)
+    use_derived_retention = (
+        derived_retention is not None
+        and (
+            not metadata
+            or not retention_metadata.get("arguments_rule")
+            or not retention_metadata.get("output_rule")
+        )
+    )
+    if use_derived_retention and derived_retention:
+        for key, value in derived_retention.items():
+            retention_metadata.setdefault(key, value)
+
+    if retention_metadata:
+        args_rule = retention_metadata.get("arguments_rule", "all")
+        out_rule = retention_metadata.get("output_rule", "all")
+        observed_args_rules = retention_metadata.get("observed_arguments_rules", [])
+        observed_output_rules = retention_metadata.get("observed_output_rules", [])
         privacy_notes: list[str] = []
         if args_rule == "mixed":
             observed = _format_retention_rule_list(observed_args_rules)
@@ -749,13 +811,16 @@ def _render_report_header(
             )
         if privacy_notes:
             items = "".join(f"<li>{n}</li>" for n in privacy_notes)
+            note_source = "bundle.json"
+            if use_derived_retention and retention_metadata.get("_derived_from_analyzers"):
+                note_source = "analyzer metadata (bundle.json unavailable)"
             privacy_html = f"""
             <div class="privacy-notice">
                 <h3>Retention Policy</h3>
                 <ul class="findings-list">{items}</ul>
                 <p style="margin:4px 0 0;font-size:0.92em;opacity:0.85">
                     Some analyzer sections may show reduced detail.
-                    Check <code>bundle.json</code> for the resolved policy.
+                    Retention state derived from <code>{html.escape(note_source)}</code>.
                 </p>
             </div>
             """
@@ -1440,11 +1505,24 @@ def _render_command_retry_success(data: dict, mythic_base_url: str = "") -> str:
                 for i, a in enumerate(attempts)
             ) + "</ul>"
 
+        comparison_notes = pattern.get("argument_comparison_notes", [])
+        comparison_unknown = pattern.get("argument_comparison_unknown", False)
+        notes_html = ""
+        if comparison_notes:
+            notes_html = "<ul>" + "".join(
+                f"<li>{html.escape(note)}</li>" for note in comparison_notes
+            ) + "</ul>"
+
         if structured_changes:
             arg_changes_html = f"""
                 <p><strong>Parameter changes:</strong></p>
                 {_format_structured_diff(structured_changes)}
             """
+            if notes_html:
+                arg_changes_html += f"""
+                <p><strong>Comparison notes:</strong></p>
+                {notes_html}
+                """
         else:
             # Fall back to legacy format
             arg_changes = pattern.get("argument_changes", [])
@@ -1452,6 +1530,22 @@ def _render_command_retry_success(data: dict, mythic_base_url: str = "") -> str:
                 arg_changes_html = "<p><strong>Parameter changes:</strong></p><ul>" + "".join(
                     f"<li>{html.escape(change)}</li>" for change in arg_changes
                 ) + "</ul>"
+                if notes_html:
+                    arg_changes_html += f"""
+                    <p><strong>Comparison notes:</strong></p>
+                    {notes_html}
+                    """
+            elif comparison_unknown:
+                arg_changes_html = """
+                <p><strong>Parameter changes:</strong> Unknown due to retention policy.</p>
+                """
+                if notes_html:
+                    arg_changes_html += notes_html
+            elif notes_html:
+                arg_changes_html = """
+                <p><strong>Parameter changes:</strong> No changes detected.</p>
+                <p><strong>Comparison notes:</strong></p>
+                """ + notes_html
             else:
                 arg_changes_html = "<p><strong>Parameter changes:</strong> None (same arguments retried)</p>"
 

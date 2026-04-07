@@ -103,6 +103,51 @@ def _parse_args(arguments_raw: str) -> dict | str:
         return arguments_raw
 
 
+def _compare_attempt_arguments(
+    attempt1: dict,
+    attempt2: dict,
+) -> tuple[list[str], list[dict], str | None, bool]:
+    """Compare attempt arguments while respecting retention limits."""
+    retained1 = str(attempt1.get("arguments_retained", "") or "")
+    retained2 = str(attempt2.get("arguments_retained", "") or "")
+
+    if not retained1 and not retained2:
+        args1 = _parse_args(attempt1.get("arguments_raw", ""))
+        args2 = _parse_args(attempt2.get("arguments_raw", ""))
+        legacy_changes, structured_changes = _compare_args(args1, args2)
+        return legacy_changes, structured_changes, None, False
+
+    if retained1 == "hash" and retained2 == "hash":
+        digest1 = str(attempt1.get("arguments_digest", "") or "")
+        digest2 = str(attempt2.get("arguments_digest", "") or "")
+        if digest1 and digest2:
+            if digest1 == digest2:
+                return [], [], "arguments compared via digest only; digest unchanged", False
+            return (
+                ["arguments modified (digest changed)"],
+                [{
+                    "path": "(arguments_digest)",
+                    "type": "modified",
+                    "old_value": digest1[:20] + ("..." if len(digest1) > 20 else ""),
+                    "new_value": digest2[:20] + ("..." if len(digest2) > 20 else ""),
+                }],
+                "arguments compared via digest only; detailed diff unavailable",
+                False,
+            )
+
+    retained_label = retained1 or retained2 or "withheld"
+    note = (
+        f"parameter comparison unavailable because arguments were withheld "
+        f"(policy: {retained_label})"
+    )
+    if retained1 and retained2 and retained1 != retained2:
+        note = (
+            "parameter comparison unavailable because attempts used different "
+            f"retention policies ({retained1} vs {retained2})"
+        )
+    return [], [], note, True
+
+
 def _deep_diff(obj1, obj2, path="", depth=0, max_depth=10) -> list[dict]:
     """Recursively compare two objects and return structured diff.
 
@@ -324,10 +369,13 @@ def _analyze_sequence(
     # Analyze argument changes between consecutive attempts
     all_legacy_changes = []
     per_transition_changes = []
+    comparison_notes = []
+    comparison_unknown = False
     for i in range(len(sequence) - 1):
-        args1 = _parse_args(sequence[i]["arguments_raw"])
-        args2 = _parse_args(sequence[i + 1]["arguments_raw"])
-        legacy_changes, structured_changes = _compare_args(args1, args2)
+        legacy_changes, structured_changes, comparison_note, unknown = _compare_attempt_arguments(
+            sequence[i],
+            sequence[i + 1],
+        )
         all_legacy_changes.extend(legacy_changes)
         if structured_changes:
             per_transition_changes.append({
@@ -335,6 +383,10 @@ def _analyze_sequence(
                 "to_attempt": i + 2,
                 "changes": structured_changes,
             })
+        if comparison_note:
+            comparison_notes.append(f"Attempt {i + 1} -> {i + 2}: {comparison_note}")
+        if unknown:
+            comparison_unknown = True
 
     # Remove duplicates from legacy changes while preserving order
     seen = set()
@@ -386,6 +438,8 @@ def _analyze_sequence(
         "time_span_seconds": round(time_span, 1),
         "argument_changes": unique_legacy_changes,
         "argument_changes_structured": per_transition_changes,
+        "argument_comparison_notes": comparison_notes,
+        "argument_comparison_unknown": comparison_unknown,
         "final_status": "success",
         "timestamps": timestamps,
         "attempts": attempts,

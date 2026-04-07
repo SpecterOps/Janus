@@ -158,6 +158,18 @@ def _full_command(task: dict[str, Any]) -> str:
     arguments_raw = str(task.get("arguments_raw", "") or "").strip()
     if command_name and arguments_raw:
         return f"{command_name} {arguments_raw}"
+    retained = str(task.get("arguments_retained", "") or "")
+    if command_name and retained == "drop":
+        return f"{command_name} [arguments redacted]"
+    if command_name and retained == "hash":
+        digest = str(task.get("arguments_digest", "") or "")
+        short = digest[:20] + "..." if len(digest) > 20 else digest
+        return f"{command_name} [args hash: {short or 'unavailable'}]"
+    if command_name and retained == "features_only":
+        shape = str(task.get("arguments_shape", "") or "")
+        length = task.get("arguments_length", 0)
+        summary = f"{shape}, {length} chars" if shape else f"{length} chars"
+        return f"{command_name} [args features: {summary}]"
     return command_name or arguments_raw
 
 
