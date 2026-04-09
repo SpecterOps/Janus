@@ -37,6 +37,11 @@ cp Config/janus.example.yml Config/janus.yml # set source, redaction settings, e
 
 `pull` and `run` include source preflight/auth handling; for provider-specific auth, config precedence, TLS caveats, and Docker networking details, see [docs/FAQ.md](docs/FAQ.md) and [docs/architecture.md](docs/architecture.md#docker-wrapper-networking).
 
+To use the skills in this repo, you should invoke `claude` or `codex` CLI in the Janus folder. Once you use `/` (claude) or `$` (codex) for use of a skill, it will be populated there automatically. Two skills come included:
+
+- [janus-analyzer-skill](https://github.com/SpecterOps/Janus/blob/main/.codex/skills/janus-analyzer-skill/SKILL.md): Use this skill for Janus requests that ask what to measure, how to measure it, which analyzer should answer it, or how to implement or adjust source-aware analysis for Mythic or Ghostwriter telemetry.
+- [janus-insight-interpreter](https://github.com/SpecterOps/Janus/blob/main/.codex/skills/janus-report-interpreter/SKILL.md): Use this skill for Janus requests that ask for insights from any Janus artifact, including report HTML, bundles, analyzer outputs, events.ndjson, raw exports, or standalone JSON snippets.
+
 ## Demo 
 
 <p align="center">
