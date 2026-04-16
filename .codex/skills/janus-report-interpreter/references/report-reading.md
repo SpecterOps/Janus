@@ -34,4 +34,4 @@ Use this reference when reading Janus output files directly.
 
 - Compare runs with the same source first.
 - Check whether task counts are large enough to support the conclusion.
-- If one run is Ghostwriter and the other is Mythic, qualify the comparison heavily.
+- If the runs come from different sources, qualify the comparison heavily and call out any fidelity mismatch.

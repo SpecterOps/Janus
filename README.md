@@ -15,6 +15,8 @@ cp Config/janus.example.yml Config/janus.yml # set source, redaction settings, e
 ./janus-cli run
 ```
 
+`pull` and `run` include source preflight/auth handling; for provider-specific auth, config precedence, TLS caveats, and Docker networking details, see [docs/FAQ.md](docs/FAQ.md) and [docs/architecture.md](docs/architecture.md).
+
 ## Usage
 
 ```bash
@@ -34,13 +36,6 @@ cp Config/janus.example.yml Config/janus.yml # set source, redaction settings, e
 ./janus-cli status # display the current ingest/analyze/report state
 ./janus-cli config # print active configuration
 ```
-
-`pull` and `run` include source preflight/auth handling; for provider-specific auth, config precedence, TLS caveats, and Docker networking details, see [docs/FAQ.md](docs/FAQ.md) and [docs/architecture.md](docs/architecture.md#docker-wrapper-networking).
-
-To use the skills in this repo, you should invoke `claude` or `codex` CLI in the Janus folder. Once you use `/` (claude) or `$` (codex) for use of a skill, it will be populated there automatically. Two skills come included:
-
-- [janus-analyzer-skill](https://github.com/SpecterOps/Janus/blob/main/.codex/skills/janus-analyzer-skill/SKILL.md): Use this skill for Janus requests that ask what to measure, how to measure it, which analyzer should answer it, or how to implement or adjust source-aware analysis for Mythic or Ghostwriter telemetry.
-- [janus-insight-interpreter](https://github.com/SpecterOps/Janus/blob/main/.codex/skills/janus-report-interpreter/SKILL.md): Use this skill for Janus requests that ask for insights from any Janus artifact, including report HTML, bundles, analyzer outputs, events.ndjson, raw exports, or standalone JSON snippets.
 
 ## Demo 
 
@@ -72,6 +67,14 @@ To use the skills in this repo, you should invoke `claude` or `codex` CLI in the
 
 `parameter-entropy` works best when you tune `Config/analyzer_registry.yml` to your own workflows. The current `upload` tuning reflects our observed data and should be treated as a starting point, not a universal baseline.
 
+## Skills
+
+Use repo-local skills by running `claude` or `codex` from the Janus folder, then invoking the skill with `/` or `$`.
+
+- [janus-analyzer-skill](https://github.com/SpecterOps/Janus/blob/main/.codex/skills/janus-analyzer-skill/SKILL.md): Use for Janus measurement, analyzer-selection, and source-aware implementation requests across Janus-supported C2 telemetry.
+- [janus-insight-interpreter](https://github.com/SpecterOps/Janus/blob/main/.codex/skills/janus-report-interpreter/SKILL.md): Use for evidence-based interpretation of Janus artifacts across Janus-supported C2 telemetry.
+
+
 ## Privacy
 
 Janus runs analysis locally and does **not** use LLMs or external services for normalized operation data.
@@ -85,6 +88,8 @@ Retention policies (`output_rule` and `arguments_rule`) control what normalized 
 - `events.ndjson` - normalized event stream for debugging, replay, and testing
 
 For the full normalized event model and architecture notes, see docs below.
+
+
 
 ## Docs
 

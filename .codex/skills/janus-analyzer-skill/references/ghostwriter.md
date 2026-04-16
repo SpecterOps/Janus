@@ -1,6 +1,6 @@
 # Ghostwriter Analyzer Context
 
-Use this when the request is explicitly Ghostwriter-backed or when the user wants a source-aware answer that accounts for Ghostwriter limits.
+Use this when the request is explicitly Ghostwriter-backed or when the user wants a source-aware answer that accounts for Ghostwriter limits within Janus-supported C2 telemetry.
 
 ## Read First
 
