@@ -21,6 +21,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from Core.analyzer_behavior_registry import build_analyzer_context
+from Core.analyzer_command_grouping import analyzer_command_group
 from Core.output_rule import copy_task_retention_fields
 
 # Gaps longer than 4 hours between task submission and result are almost certainly
@@ -45,6 +46,9 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
             "source": t.get("source", ""),
             "tool_name": t.get("tool_name", ""),
             "command_name": t["command_name"],
+            "analyzer_group": analyzer_command_group(t),
+            "shell_command_name": t.get("command_name", ""),
+            "pty_synthetic": bool(t.get("pty_synthetic")),
             "timestamp": t["timestamp"],
             "arguments_raw": t.get("arguments_raw", ""),
             "display_id": t.get("display_id", 0),
@@ -65,16 +69,18 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
 
         task_info = task_by_id[task_id]
         result_timestamp = r["timestamp"]
+        bucket = task_info["analyzer_group"]
         behavior = registry.resolve({
             "source": task_info["source"],
             "tool_name": task_info["tool_name"],
-            "command_name": task_info["command_name"],
+            "command_name": bucket,
         })
 
-        if behavior.has_class("expected_sleep_or_delay") and behavior.command_duration.get("mode") == "exclude_from_friction":
+        if behavior.command_duration.get("mode") == "exclude_from_friction":
             # Keep the command visible in the output for traceability, but record
-            # that its timings are expected-delay behavior rather than operator friction.
-            registry_excluded_by_command[task_info["command_name"]] += 1
+            # that its timings are expected (sleep, PTY session lifetime, etc.) rather
+            # than operator friction.
+            registry_excluded_by_command[bucket] += 1
 
         wall_clock = _time_diff_seconds(task_info["timestamp"], result_timestamp)
         if wall_clock < 0:
@@ -82,7 +88,7 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
         if wall_clock > MAX_WALL_CLOCK_SECONDS:
             # Overnight / session-break gap — not real execution time; skip silently
             # but count it so callers can see data was excluded.
-            excluded_by_command[task_info["command_name"]] += 1
+            excluded_by_command[bucket] += 1
             continue
 
         processing_ts = task_info["processing_timestamp"]
@@ -101,7 +107,7 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
 
         primary = agent_duration if agent_duration is not None else wall_clock
 
-        durations_by_command[task_info["command_name"]].append({
+        row = {
             "duration": primary,
             "wall_clock": wall_clock,
             "agent": agent_duration,
@@ -109,10 +115,13 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
             "operation_id": task_info["operation_id"],
             "task_id": r["task_id"],
             "display_id": task_info["display_id"],
-            "command_name": task_info["command_name"],
+            "command_name": bucket,
             "arguments_raw": task_info["arguments_raw"],
             **copy_task_retention_fields(task_info),
-        })
+        }
+        if task_info.get("pty_synthetic"):
+            row["pty_shell_command"] = task_info.get("shell_command_name", "")
+        durations_by_command[bucket].append(row)
 
     command_stats = {}
     for command_name in sorted(durations_by_command):
@@ -136,7 +145,7 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
         if registry.resolve({
             "source": info["source"],
             "tool_name": info["tool_name"],
-            "command_name": info["command_name"],
+            "command_name": info["analyzer_group"],
         }).has_class("result_status_unreliable")
     })
 
@@ -206,6 +215,9 @@ def _compute_stats(entries: list[dict]) -> dict:
         "duration_seconds": round(max_entry["duration"], 2),
         **copy_task_retention_fields(max_entry),
     }
+    # Not in copy_task_retention_fields; required for HTML / consumers (pty_in_session → cd …)
+    if max_entry.get("pty_shell_command"):
+        max_event["pty_shell_command"] = max_entry["pty_shell_command"]
 
     sorted_durations = sorted(durations)
     p95_index = int(0.95 * len(sorted_durations))
@@ -220,8 +232,9 @@ def _compute_stats(entries: list[dict]) -> dict:
         threshold = mean_val + (3 * stdev)
         outlier_entries = [e for e in entries if e["duration"] > threshold]
         outlier_count = len(outlier_entries)
-        outlier_events = [
-            {
+        outlier_events = []
+        for e in sorted(outlier_entries, key=lambda x: x["duration"], reverse=True):
+            od = {
                 "operation_id": e.get("operation_id", 0),
                 "task_id": e["task_id"],
                 "display_id": e.get("display_id", 0),
@@ -230,8 +243,9 @@ def _compute_stats(entries: list[dict]) -> dict:
                 "duration_seconds": round(e["duration"], 2),
                 **copy_task_retention_fields(e),
             }
-            for e in sorted(outlier_entries, key=lambda e: e["duration"], reverse=True)
-        ]
+            if e.get("pty_shell_command"):
+                od["pty_shell_command"] = e["pty_shell_command"]
+            outlier_events.append(od)
 
     return {
         "execution_count": execution_count,

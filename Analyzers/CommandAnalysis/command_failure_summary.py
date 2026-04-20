@@ -9,6 +9,7 @@ No heuristics. No workflows. No chaining.
 
 from collections import defaultdict
 
+from Core.analyzer_command_grouping import analyzer_command_group
 from Core.output_rule import copy_result_retention_fields, copy_task_retention_fields
 
 
@@ -47,7 +48,7 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
             # Orphaned result — no matching task. Skip silently.
             continue
 
-        command_name = task["command_name"]
+        command_name = analyzer_command_group(task)
         cb_id = str(task.get("callback_id", 0))
 
         entry = counts[command_name]
@@ -93,13 +94,13 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
             for r in result_events:
                 if r["status"] == "error":
                     task = task_by_id.get(_task_key(r))
-                    if task and task["command_name"] == command_name:
+                    if task and analyzer_command_group(task) == command_name:
                         # Truncate error message to ~500 chars
                         error_msg = r.get("output_text", "")
                         if len(error_msg) > 500:
                             error_msg = error_msg[:500] + "..."
 
-                        failures.append({
+                        fail_row = {
                             "operation_id": r.get("operation_id", 0),
                             "task_id": r["task_id"],
                             "display_id": task.get("display_id", 0),
@@ -112,7 +113,10 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
                             "dispatch_failed": r.get("dispatch_failed", False),
                             **copy_task_retention_fields(task),
                             **copy_result_retention_fields(r),
-                        })
+                        }
+                        if task.get("pty_synthetic"):
+                            fail_row["pty_shell_command"] = task.get("command_name", "")
+                        failures.append(fail_row)
 
                         # Limit to 20 failures per command to avoid JSON bloat
                         if len(failures) >= 20:

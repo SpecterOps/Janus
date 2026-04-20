@@ -1,5 +1,7 @@
 out/
 dist/
+build/
+*.egg-info/
 
 # Compiled binaries (distributed via Releases, not committed to repo)
 janus-cli
@@ -12,5 +14,24 @@ janus-cli-windows-amd64.exe
 
 __pycache__/
 *.pyc
+
+# Testing / coverage (local runs; never commit)
 .pytest_cache/
+.tox/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.pytest_tmp/
+uv.lock
+
+Config/janus.yml
+Tests/
+# Local virtualenv (uv/pip)
+.venv/
+
+# Local Claude Code permissions
+.claude/settings.local.json
 

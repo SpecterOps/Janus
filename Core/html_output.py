@@ -1380,6 +1380,20 @@ def _format_full_command(
     return command_name
 
 
+def _format_duration_row_command(evt: dict, fallback_name: str, *, max_length: int = 150) -> str:
+    """Show PTY in-session lines as nested (pty_in_session → shell cmd), not top-level Mythic tasks."""
+    shell = evt.get("pty_shell_command")
+    if shell:
+        inner = _format_full_command(shell, evt.get("arguments_raw", ""), max_length=max_length, event=evt)
+        return f"pty_in_session → {inner}"
+    return _format_full_command(
+        evt.get("command_name") or fallback_name,
+        evt.get("arguments_raw", ""),
+        max_length=max_length,
+        event=evt,
+    )
+
+
 def _strip_repr_quotes(s: str) -> str:
     """Strip surrounding Python repr() single quotes from a value string."""
     s = str(s)
@@ -1780,11 +1794,7 @@ def _render_command_duration(data: dict, mythic_base_url: str = "", outlier_cont
             for evt in outlier_events:
                 task_id = evt['task_id']
                 duration = evt['duration_seconds']
-                full_command = _format_full_command(
-                    evt.get('command_name', ''),
-                    evt.get('arguments_raw', ''),
-                    event=evt,
-                )
+                full_command = _format_duration_row_command(evt, evt.get("command_name", ""))
 
                 # Add context if available
                 context_html = _render_task_context(task_id, outlier_context_map, mythic_base_url)
@@ -1805,13 +1815,8 @@ def _render_command_duration(data: dict, mythic_base_url: str = "", outlier_cont
 
         # Build max event details
         max_event = stats.get("max_event") or {}
-        # Format full command with arguments
-        full_command = _format_full_command(
-            max_event.get('command_name', cmd_name),
-            max_event.get('arguments_raw', ''),
-            max_length=150,
-            event=max_event,
-        )
+        # Format full command with arguments (PTY synthetics nested under pty_in_session)
+        full_command = _format_duration_row_command(max_event, cmd_name, max_length=150)
         task_id = max_event.get('task_id', 'N/A')
         display_id = max_event.get('display_id') or None
         duration_seconds = max_event.get('duration_seconds', 0)
@@ -1824,9 +1829,23 @@ def _render_command_duration(data: dict, mythic_base_url: str = "", outlier_cont
         </details>
         """
 
+        # Table "Command Name": show slowest nested shell line for PTY bucket (max duration row)
+        name_cell = html.escape(cmd_name)
+        if cmd_name == "pty_in_session" and max_event.get("pty_shell_command"):
+            peak = _format_full_command(
+                max_event["pty_shell_command"],
+                max_event.get("arguments_raw", ""),
+                max_length=100,
+                event=max_event,
+            )
+            name_cell = (
+                f"{html.escape(cmd_name)}<br>"
+                f'<span class="text-muted" style="font-size:0.9em">slowest line: {html.escape(peak)}</span>'
+            )
+
         rows.append(f"""
         <tr>
-            <td>{html.escape(cmd_name)}</td>
+            <td>{name_cell}</td>
             <td>{exec_count}</td>
             <td class="col-extra" data-sort="{mean}">{mean:.2f}s</td>
             <td data-sort="{median}">{median:.2f}s</td>
@@ -2438,6 +2457,14 @@ def _render_parameter_entropy(data: dict, mythic_base_url: str = "") -> str:
     return _collapsible_section("Parameter Entropy", content)
 
 
+def _format_argument_profile_command_label(cmd_name: str) -> str:
+    """Human-readable label for per_command keys (PTY synthetics use pty_in_session::shell)."""
+    if cmd_name.startswith("pty_in_session::"):
+        shell = cmd_name.split("::", 1)[1]
+        return f"PTY ▸ {html.escape(shell)}"
+    return html.escape(cmd_name)
+
+
 def _render_argument_position_profile(data: dict, base_url: str = "") -> str:
     """Render argument position profiling and findings as HTML."""
     summary = data.get("summary", {})
@@ -2447,6 +2474,15 @@ def _render_argument_position_profile(data: dict, base_url: str = "") -> str:
 
     total_findings = summary.get("total_findings", 0)
 
+    has_pty_shell_keys = any(str(k).startswith("pty_in_session::") for k in per_command.keys())
+    pty_key_note = ""
+    if has_pty_shell_keys:
+        pty_key_note = (
+            "<p><strong>PTY in-session:</strong> each typed shell command has its own profile "
+            "(keys like <code>pty_in_session::cd</code>). This is separate from the "
+            "<code>pty_in_session</code> roll-up used in duration metrics.</p>"
+        )
+
     summary_html = f"""
     <div class="summary-stats">
         <p><strong>Commands profiled:</strong> {summary.get('commands_profiled', 0)}</p>
@@ -2455,6 +2491,7 @@ def _render_argument_position_profile(data: dict, base_url: str = "") -> str:
         <p><strong>Mean argument depth:</strong> {summary.get('mean_argument_depth', 0)}</p>
         <p><strong>Positions profiled:</strong> {summary.get('positions_profiled', 0)}</p>
         <p><strong>Findings:</strong> {total_findings}</p>
+        {pty_key_note}
     </div>
     """
 
@@ -2536,7 +2573,7 @@ def _render_argument_position_profile(data: dict, base_url: str = "") -> str:
         finding_rows = []
         for f in findings[:30]:
             ftype = type_labels.get(f["type"], f["type"])
-            cmd = html.escape(f.get("command_name", ""))
+            cmd = _format_argument_profile_command_label(f.get("command_name", ""))
             pos = f.get("position", "&mdash;")
             detail = _finding_detail(f)
             finding_rows.append(f"""
@@ -2589,9 +2626,15 @@ def _render_argument_position_profile(data: dict, base_url: str = "") -> str:
                 <td>{top_vals}</td>
             </tr>
             """)
+        if cmd_name.startswith("pty_in_session::"):
+            title = _format_argument_profile_command_label(cmd_name)
+            key_hint = f' <span class="text-muted">(<code>{html.escape(cmd_name)}</code>)</span>'
+        else:
+            title = f"<code>{html.escape(cmd_name)}</code>"
+            key_hint = ""
         per_command_blocks.append(f"""
         <details>
-            <summary><code>{html.escape(cmd_name)}</code> &mdash; {task_count} tasks, {len(positions)} positions</summary>
+            <summary>{title}{key_hint} &mdash; {task_count} tasks, {len(positions)} positions</summary>
             <div class="table-wrap">
             <table class="sortable">
                 <thead>
@@ -2621,7 +2664,7 @@ def _render_argument_position_profile(data: dict, base_url: str = "") -> str:
     # --- Depth distribution table ---
     depth_rows = []
     for entry in depth_dist[:25]:
-        cmd = html.escape(entry.get("command_name", ""))
+        cmd = _format_argument_profile_command_label(entry.get("command_name", ""))
         depth_rows.append(f"""
         <tr>
             <td><code>{cmd}</code></td>

@@ -13,6 +13,7 @@ import statistics
 from collections import defaultdict
 from datetime import datetime
 
+from Core.analyzer_command_grouping import analyzer_command_group
 from Core.output_rule import copy_task_retention_fields
 
 
@@ -56,22 +57,27 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
             if dwell_seconds < 1.0 or dwell_seconds >= 14400.0:
                 continue
 
-            dwells.append({
+            row = {
                 "operation_id": operation_id,
                 "from_task_id": from_task["task_id"],
                 "from_display_id": from_task.get("display_id", 0),
-                "from_command": from_task["command_name"],
+                "from_command": analyzer_command_group(from_task),
                 "from_timestamp": from_task["timestamp"],
                 "from_arguments_raw": from_task.get("arguments_raw", ""),
                 **copy_task_retention_fields(from_task, dest_prefix="from_"),
                 "to_task_id": to_task["task_id"],
                 "to_display_id": to_task.get("display_id", 0),
-                "to_command": to_task["command_name"],
+                "to_command": analyzer_command_group(to_task),
                 "to_timestamp": to_task["timestamp"],
                 "to_arguments_raw": to_task.get("arguments_raw", ""),
                 **copy_task_retention_fields(to_task, dest_prefix="to_"),
                 "dwell_seconds": dwell_seconds,
-            })
+            }
+            if from_task.get("pty_synthetic"):
+                row["from_pty_shell_command"] = from_task.get("command_name", "")
+            if to_task.get("pty_synthetic"):
+                row["to_pty_shell_command"] = to_task.get("command_name", "")
+            dwells.append(row)
 
     # Compute statistics
     statistics_result = _compute_statistics(dwells) if dwells else _empty_statistics()
@@ -167,8 +173,9 @@ def _compute_statistics(dwells: list[dict]) -> dict:
         outlier_dwells.sort(key=lambda d: d["dwell_seconds"], reverse=True)
 
         # Build outlier event list with full context
-        outlier_events = [
-            {
+        outlier_events = []
+        for d in outlier_dwells:
+            oe = {
                 "operation_id": d.get("operation_id", 0),
                 "from_task_id": d["from_task_id"],
                 "from_display_id": d["from_display_id"],
@@ -184,8 +191,11 @@ def _compute_statistics(dwells: list[dict]) -> dict:
                 **copy_task_retention_fields(d, source_prefix="to_", dest_prefix="to_"),
                 "dwell_seconds": round(d["dwell_seconds"], 2),
             }
-            for d in outlier_dwells
-        ]
+            if "from_pty_shell_command" in d:
+                oe["from_pty_shell_command"] = d["from_pty_shell_command"]
+            if "to_pty_shell_command" in d:
+                oe["to_pty_shell_command"] = d["to_pty_shell_command"]
+            outlier_events.append(oe)
 
     return {
         "dwell_count": dwell_count,

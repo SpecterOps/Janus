@@ -13,6 +13,7 @@ import json
 from collections import defaultdict
 from datetime import datetime
 
+from Core.analyzer_command_grouping import retry_sequence_group_key
 from Core.output_rule import copy_task_retention_fields
 
 
@@ -35,10 +36,11 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
     for r in result_events:
         result_by_task[_task_key(r)] = r["status"]
 
-    # Group tasks by (operation_id, command_name) and sort by timestamp
-    groups: dict[tuple[int, str], list[dict]] = defaultdict(list)
+    # Group tasks by (operation_id, command_name) and sort by timestamp.
+    # PTY in-session synthetics share bucket pty_in_session but are split by shell command.
+    groups: dict[tuple, list[dict]] = defaultdict(list)
     for t in task_events:
-        key = (t["operation_id"], t["command_name"])
+        key = retry_sequence_group_key(t)
         groups[key].append(t)
 
     # Sort each group by timestamp
@@ -48,7 +50,11 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
     retry_patterns = []
 
     # Process each group to find retry sequences
-    for (operation_id, command_name), tasks in groups.items():
+    for group_key, tasks in groups.items():
+        if len(group_key) == 3:
+            operation_id, _pty_bucket, command_name = group_key
+        else:
+            operation_id, command_name = group_key
         # Scan for retry windows, avoiding overlaps
         i = 0
         while i < len(tasks):

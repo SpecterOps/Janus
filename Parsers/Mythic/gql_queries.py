@@ -5,7 +5,13 @@ Use %s for operation_id - inlined to avoid variables (can trigger PersistedQuery
 Single-line format to match working curl requests.
 """
 
-TASKS_QUERY = 'query { task(where: { operation_id: { _eq: %s } }) { id display_id callback_id callback { display_id sleep_info } command_name command { cmd payloadtype { name } } original_params status completed timestamp status_timestamp_submitted status_timestamp_processing status_timestamp_processed operation_id parent_task_id } }'
+# Task stdout/stderr: PTY session text may aggregate here when interactive GraphQL is absent.
+TASKS_QUERY = 'query { task(where: { operation_id: { _eq: %s } }) { id display_id agent_task_id callback_id callback { display_id sleep_info } command_name command { cmd payloadtype { name } } original_params status completed timestamp status_timestamp_submitted status_timestamp_processing status_timestamp_processed operation_id parent_task_id stdout stderr } }'
+
+# Optional Hasura collection ``interactive`` (public.interactive) — exposed on Mythic versions that
+# persist interactive PTY streams. Verified optional: missing root field => graceful fallback.
+# Mythic 3.x / Hasura: operation-scoped via task.operation_id.
+INTERACTIVE_MESSAGES_QUERY = 'query { interactive(where: { task: { operation_id: { _eq: %s } } }) { id task_id message_type data timestamp task { id operation_id agent_task_id command_name callback_id callback { display_id sleep_info } } } }'
 
 RESPONSES_QUERY = 'query { response(where: { task: { operation_id: { _eq: %s } } }) { id task_id response_text timestamp } }'
 

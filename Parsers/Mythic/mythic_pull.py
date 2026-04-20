@@ -28,11 +28,17 @@ from Core.output_rule import (
     normalize_output_rule,
 )
 from Parsers.Mythic.gql_queries import (
+    INTERACTIVE_MESSAGES_QUERY,
     OPERATION_QUERY,
     PARENT_TASKS_BY_ID_QUERY,
     PREFLIGHT_TASK_QUERY,
     RESPONSES_QUERY,
     TASKS_QUERY,
+)
+from Parsers.Mythic.pty_ingest import (
+    build_synthetics_from_child_pty_tasks,
+    build_synthetics_from_interactive_stream,
+    group_interactive_by_parent_task_id,
 )
 
 
@@ -113,6 +119,7 @@ class MythicPullParser:
         self.api_token = api_token
         self.verify_tls = verify_tls
         self.debug = debug
+        self._last_pty_interactive_query_available = False
         self._session = requests.Session()
         self._session.headers["Content-Type"] = "application/json"
         self._session.headers["apitoken"] = api_token
@@ -158,6 +165,12 @@ class MythicPullParser:
             for field in ("id", "command_name", "completed"):
                 if row[field] is None:
                     raise ValueError(f"Task row has null '{field}' - schema may have changed")
+            if "stdout" not in row or row.get("stdout") is None:
+                row["stdout"] = ""
+            if "stderr" not in row or row.get("stderr") is None:
+                row["stderr"] = ""
+            if "agent_task_id" not in row or row.get("agent_task_id") is None:
+                row["agent_task_id"] = ""
             # Validate command join (contains payload type and original command name)
             if "command" in row and row["command"]:
                 if "cmd" not in row["command"]:
@@ -179,6 +192,30 @@ class MythicPullParser:
             if row["response_text"] is None:
                 raise ValueError("Response row has null 'response_text' - schema may have changed")
         return rows
+
+    def fetch_interactive_messages(self, operation_id: int) -> tuple[list[dict], bool]:
+        """Fetch interactive PTY message rows when Hasura exposes the ``interactive`` root field.
+
+        Returns (rows, available). When the field is missing (older Mythic), returns ([], False)
+        without raising.
+        """
+        try:
+            data = self._execute_query(INTERACTIVE_MESSAGES_QUERY % operation_id)
+        except RuntimeError as exc:
+            err = str(exc).lower()
+            if "interactive" in err or "cannot query field" in err or "unknown field" in err:
+                return [], False
+            raise
+        rows = data.get("interactive")
+        if rows is None:
+            return [], False
+        for row in rows:
+            for field in ("id", "task_id", "message_type", "data", "timestamp"):
+                if field not in row:
+                    raise KeyError(
+                        f"interactive row missing field '{field}' — Mythic GraphQL schema may have changed"
+                    )
+        return rows, True
 
     def fetch_operation_name(self, operation_id: int) -> str:
         """Fetch the human-readable operation name from Mythic.
@@ -213,6 +250,8 @@ class MythicPullParser:
         """Fetch tasks and responses, normalize into task and result events."""
         tasks = self.fetch_tasks(operation_id)
         responses = self.fetch_responses(operation_id)
+        interactive_rows, pty_interactive_available = self.fetch_interactive_messages(operation_id)
+        self._last_pty_interactive_query_available = pty_interactive_available
 
         # Group responses by task_id, concatenate response_text by timestamp
         by_task: dict[int, list[tuple[str, str]]] = defaultdict(list)
@@ -263,11 +302,52 @@ class MythicPullParser:
             if t.get("parent_task_id") is not None and t["parent_task_id"] in task_by_id
         }
 
+        pty_parent_ids: set[int] = {
+            tid for tid in dispatcher_task_ids if task_by_id.get(tid, {}).get("command_name") == "pty"
+        }
+
+        interactive_by_parent = group_interactive_by_parent_task_id(interactive_rows, task_by_id)
+
+        children_by_parent: dict[int, list[dict]] = defaultdict(list)
+        for t in tasks:
+            p = t.get("parent_task_id")
+            if p is not None:
+                children_by_parent[int(p)].append(t)
+
+        suppressed_task_ids: set[int] = set()
+        synthetic_task_events: list[TaskEvent] = []
+        synthetic_result_events: list[ResultEvent] = []
+        parent_preface: dict[int, str] = {}
+
+        for parent_id in pty_parent_ids:
+            parent_row = task_by_id[parent_id]
+            children = [c for c in children_by_parent.get(parent_id, []) if c.get("command_name") == "pty"]
+            ims = interactive_by_parent.get(parent_id, [])
+            if ims:
+                st, sr, _, preface = build_synthetics_from_interactive_stream(
+                    operation_id, parent_row, ims
+                )
+                synthetic_task_events.extend(st)
+                synthetic_result_events.extend(sr)
+                if preface:
+                    parent_preface[parent_id] = preface
+                suppressed_task_ids.update(int(c["id"]) for c in children)
+            elif children:
+                st, sr, sup = build_synthetics_from_child_pty_tasks(
+                    operation_id, parent_row, children
+                )
+                synthetic_task_events.extend(st)
+                synthetic_result_events.extend(sr)
+                suppressed_task_ids |= sup
+
         for t in tasks:
             task_id = t["id"]
 
-            # Skip dispatcher parents — their sub-tasks carry the real work.
-            if task_id in dispatcher_task_ids:
+            if task_id in suppressed_task_ids:
+                continue
+
+            # Skip dispatcher parents — except PTY session launches (long-lived parent task).
+            if task_id in dispatcher_task_ids and task_id not in pty_parent_ids:
                 continue
 
             original_params = t["original_params"]
@@ -277,6 +357,8 @@ class MythicPullParser:
                 arguments_raw = original_params
             else:
                 arguments_raw = json.dumps(original_params)
+
+            raw_command_name = t["command_name"]
 
             # Use submitted timestamp (operator action time); fall back to
             # row timestamp if submitted is not set.
@@ -336,6 +418,26 @@ class MythicPullParser:
                     file=sys.stderr,
                 )
 
+            task_retention: dict = {}
+            if (
+                parent_task_id is not None
+                and parent_task_id in task_by_id
+                and task_by_id[parent_task_id].get("command_name") == "pty"
+                and raw_command_name == "pty"
+            ):
+                task_retention["pty_transport_event"] = True
+                task_retention["pty_parent_task_id"] = parent_task_id
+            if task_id in pty_parent_ids:
+                task_retention["pty_session"] = True
+                task_retention["pty_child_count"] = sum(
+                    1
+                    for c in children_by_parent.get(task_id, [])
+                    if c.get("command_name") == "pty"
+                )
+                task_retention["pty_interactive_message_count"] = len(
+                    interactive_by_parent.get(task_id, [])
+                )
+
             task_events.append(
                 TaskEvent(
                     source="mythic",
@@ -353,6 +455,7 @@ class MythicPullParser:
                     issued_command_name=issued_command_name,
                     parent_task_id=parent_task_id,
                     orphaned_subtask=orphaned_subtask,
+                    retention_meta=task_retention,
                 )
             )
 
@@ -372,6 +475,10 @@ class MythicPullParser:
 
             status, dispatch_failed = ResultEvent.determine_status(t["completed"], t["status"])
 
+            result_retention: dict = {}
+            if task_id in parent_preface:
+                result_retention["pty_output_preface"] = parent_preface[task_id]
+
             result_events.append(
                 ResultEvent(
                     source="mythic",
@@ -381,8 +488,12 @@ class MythicPullParser:
                     status=status,
                     dispatch_failed=dispatch_failed,
                     output_text=output_text,
+                    retention_meta=result_retention,
                 )
             )
+
+        task_events.extend(synthetic_task_events)
+        result_events.extend(synthetic_result_events)
 
         self._promote_terminal_unknowns(task_events, result_events)
         return task_events, result_events
@@ -470,6 +581,7 @@ class MythicPullParser:
             "status_counts": status_counts,
             "output_rule": rule_applied,
             "arguments_rule": args_rule_applied,
+            "pty_interactive_query_available": self._last_pty_interactive_query_available,
         }
         write_bundle(metadata, bundle_path, analysis_timestamp)
 

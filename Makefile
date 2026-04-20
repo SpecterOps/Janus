@@ -1,8 +1,8 @@
 IMAGE   := janus
 TAG     := latest
 
-# Use Python so this works on Unix and Windows (no sed dependency).
-JANUS_VERSION := $(shell python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+# Use awk so building the Go CLI does not depend on a Python executable.
+JANUS_VERSION := $(shell awk 'BEGIN { in_project = 0 } /^\[project\]/ { in_project = 1; next } /^\[/ { in_project = 0 } in_project && /^version[[:space:]]*=/ { gsub(/"/, "", $$3); print $$3; exit }' pyproject.toml)
 ifeq ($(strip $(JANUS_VERSION)),)
 $(error Could not read version from pyproject.toml)
 endif

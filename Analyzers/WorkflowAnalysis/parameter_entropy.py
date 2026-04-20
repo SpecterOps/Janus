@@ -44,6 +44,7 @@ from collections import Counter
 from typing import Any
 
 from Core.analyzer_behavior_registry import build_analyzer_context
+from Core.analyzer_command_grouping import analyzer_command_group, task_event_for_registry_resolve
 from Core.output_rule import copy_task_retention_fields
 
 # ---------------------------------------------------------------------------
@@ -143,7 +144,7 @@ def _is_structured_json_payload(raw: str) -> bool:
 def _analyze_task(task: dict, context: dict[str, Any]) -> tuple[list[dict], dict[str, int]]:
     """Return a list of finding dicts for a single task event."""
     raw: str = task.get("arguments_raw") or ""
-    command_name: str = task.get("command_name", "")
+    command_name: str = analyzer_command_group(task)
     findings: list[dict] = []
     adjustments = {
         "registry_adjusted_tasks": 0,
@@ -151,7 +152,7 @@ def _analyze_task(task: dict, context: dict[str, Any]) -> tuple[list[dict], dict
         "converted_low_entropy_findings": 0,
     }
     registry = context["behavior_registry"]
-    behavior = registry.resolve(task)
+    behavior = registry.resolve(task_event_for_registry_resolve(task))
 
     base = {
         "task_id":       task.get("task_id"),
@@ -163,6 +164,8 @@ def _analyze_task(task: dict, context: dict[str, Any]) -> tuple[list[dict], dict
         "arguments_raw": raw,
         **copy_task_retention_fields(task),
     }
+    if task.get("pty_synthetic"):
+        base["pty_shell_command"] = task.get("command_name", "")
 
     if not raw:
         return findings, adjustments

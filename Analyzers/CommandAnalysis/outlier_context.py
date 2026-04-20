@@ -8,6 +8,8 @@ patterns to answer: What typically happens before/after long-running commands?
 
 from collections import Counter
 
+from Core.analyzer_command_grouping import analyzer_command_group
+
 from Analyzers.CommandAnalysis.command_duration import (
     _time_diff_seconds,
     analyze as command_duration_analyze,
@@ -39,13 +41,16 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
     all_outliers: list[dict] = []
     for command_name, stats in duration_result["durations"].items():
         for evt in stats.get("outlier_events", []):
-            all_outliers.append({
+            row = {
                 "operation_id": evt.get("operation_id", 0),
                 "task_id": evt["task_id"],
                 "display_id": evt.get("display_id", 0),
                 "command_name": command_name,
                 "duration_seconds": evt["duration_seconds"],
-            })
+            }
+            if evt.get("pty_shell_command"):
+                row["pty_shell_command"] = evt["pty_shell_command"]
+            all_outliers.append(row)
 
     # 4–6. Extract context, build signature for each outlier
     enriched: list[dict] = []
@@ -71,7 +76,7 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
             preceding_context, outlier["command_name"], following_context
         )
 
-        enriched.append({
+        enr = {
             "operation_id": outlier.get("operation_id", 0),
             "task_id": outlier["task_id"],
             "display_id": outlier.get("display_id", 0),
@@ -80,7 +85,10 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
             "preceding_context": preceding_context,
             "following_context": following_context,
             "sequence_signature": sequence_signature,
-        })
+        }
+        if outlier.get("pty_shell_command"):
+            enr["pty_shell_command"] = outlier["pty_shell_command"]
+        enriched.append(enr)
 
         if preceding_context:
             preceding_counts[preceding_context[-1]["command_name"]] += 1
@@ -170,13 +178,16 @@ def _extract_context(
     context = []
     for t in ordered_tasks[start:end]:
         duration = duration_by_task.get(_task_key(t))
-        context.append({
+        ctx = {
             "operation_id": t.get("operation_id", 0),
             "task_id": t["task_id"],
             "display_id": t.get("display_id", 0),
-            "command_name": t["command_name"],
+            "command_name": analyzer_command_group(t),
             "duration_seconds": duration,
-        })
+        }
+        if t.get("pty_synthetic"):
+            ctx["pty_shell_command"] = t.get("command_name", "")
+        context.append(ctx)
     return context
 
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -190,15 +191,40 @@ func buildImage() error {
 		verbose := exec.Command("docker", "build", "--network=host", "-t", imageName, ".")
 		verbose.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
 		verbose.Stdout = os.Stdout
-		verbose.Stderr = os.Stderr
+		var verboseErr bytes.Buffer
+		verbose.Stderr = io.MultiWriter(os.Stderr, &verboseErr)
 		_, _ = fmt.Fprintln(os.Stderr, "Docker: build failed in quiet mode; showing verbose logs...")
-		return verbose.Run()
+		if err := verbose.Run(); err != nil {
+			return wrapDockerBuildError(err, verboseErr.String())
+		}
+		return nil
 	})
 	if err != nil {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "Docker: image ready.")
 	return nil
+}
+
+func wrapDockerBuildError(err error, details string) error {
+	if hint := dockerCredentialHint(details); hint != "" {
+		return fmt.Errorf("docker build failed: %w. %s", err, hint)
+	}
+	return err
+}
+
+func dockerCredentialHint(details string) string {
+	lower := strings.ToLower(details)
+	if !strings.Contains(lower, "error getting credentials") &&
+		!strings.Contains(lower, "credentials") {
+		return ""
+	}
+
+	if os.Geteuid() == 0 && runtime.GOOS == "darwin" {
+		return "Docker could not read credentials while running as root. On macOS, run Janus without sudo so Docker Desktop can use your normal user's credential helper/keychain: ./janus-cli run"
+	}
+
+	return "Docker could not read registry credentials. Check Docker Desktop is running, then try `docker logout`, `docker login`, or remove/fix the broken credential helper entry in ~/.docker/config.json."
 }
 
 func runDockerBuildAttempt(args []string) error {

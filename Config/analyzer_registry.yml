@@ -18,6 +18,19 @@ commands:
       mode: exclude_from_friction
 
   - match:
+      source: mythic
+      command_name: pty
+    command_duration:
+      mode: exclude_from_friction
+
+  # PTY in-session synthetics (pwd, cd, ls, …) — wall-clock is session-scaled, not task execution.
+  - match:
+      source: mythic
+      command_name: pty_in_session
+    command_duration:
+      mode: exclude_from_friction
+
+  - match:
       command_name: /ptt
     behavior_classes:
       - expected_high_entropy

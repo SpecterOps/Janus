@@ -53,6 +53,18 @@ Do not rely on `sudo janus-cli ...` as a workaround: it can create root-owned fi
 
 On macOS or Windows, use Docker Desktop and ensure it is fully started; socket permission issues there are uncommon compared to Linux Engine.
 
+### Docker build fails with `error getting credentials`
+
+This often happens on macOS when `janus-cli` is run with `sudo`. Docker Desktop stores registry credentials and helper access in the normal user's context, so the root context may fail before the image build starts.
+
+Fix:
+
+1. Run Janus without `sudo`: `./janus-cli run`.
+2. Confirm Docker works as your normal user: `docker info`.
+3. If Docker still fails to read credentials, refresh Docker Desktop's registry state with `docker logout` and `docker login`, or fix/remove the broken credential helper entry in `~/.docker/config.json`.
+
+Avoid `sudo ./janus-cli ...` on macOS and Windows. It can break Docker credential lookup and can create root-owned files under `out/`.
+
 ### `janus analyze` says an analyzer is not a valid choice
 
 The Docker image is stale. Rebuild it, then rerun with `--no-build` if you are iterating on the same session.

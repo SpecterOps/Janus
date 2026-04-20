@@ -1,7 +1,7 @@
 interface:
   display_name: "Janus Report Interpreter"
-  short_description: "Interpret Janus findings across supported C2 telemetry"
-  default_prompt: "Use $janus-report-interpreter to summarize this Janus bundle or report into evidence-based findings and recommendations across Janus-supported C2 telemetry. Infer likely engagement context first (development, training, operation, mixed, or unclear) with confidence and explain how that context should shape interpretation."
+  short_description: "Interpret Janus findings and report limits"
+  default_prompt: "Use $janus-report-interpreter to summarize this Janus bundle or report into evidence-based findings and recommendations. Infer likely engagement context first (development, training, operation, mixed, or unclear) with confidence and explain how that context should shape interpretation."
 
 policy:
   allow_implicit_invocation: true

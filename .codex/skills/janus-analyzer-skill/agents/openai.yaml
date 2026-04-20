@@ -1,7 +1,7 @@
 interface:
   display_name: "Janus Analyzer Skill 38"
-  short_description: "Source-aware Janus analyzer design for supported C2 telemetry"
-  default_prompt: "Use $janus-analyzer-skill-38 to figure out what Janus should measure, which analyzer should answer it, or what implementation changes are needed for Janus-supported C2 telemetry."
+  short_description: "Source-aware Janus analyzer design help"
+  default_prompt: "Use $janus-analyzer-skill-38 to figure out what Janus should measure or implement for Mythic or Ghostwriter data."
 
 policy:
   allow_implicit_invocation: true

@@ -22,6 +22,8 @@ import shlex
 import statistics
 from collections import Counter, defaultdict
 
+from Core.analyzer_command_grouping import argument_profile_command_key
+
 
 # ---------------------------------------------------------------------------
 # Thresholds
@@ -208,7 +210,7 @@ def analyze(
 
     for task in task_events:
         raw = task.get("arguments_raw") or ""
-        command_name = task.get("command_name", "") or "unknown"
+        command_name = argument_profile_command_key(task)
         slots = _tokenize_arguments(raw)
 
         command_task_counts[command_name] += 1
@@ -458,6 +460,10 @@ def analyze(
                 "json": "depth-first scalar leaf flattening",
             },
             "tokenization_sources": tokenization_sources,
+            "pty_in_session_keys": (
+                "PTY in-session synthetics use per-shell keys `pty_in_session::<shell>` "
+                "(e.g. `pty_in_session::cd`) so position breakdowns are not merged into one bucket."
+            ),
         },
         "per_command": per_command,
         "findings": findings,

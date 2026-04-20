@@ -30,19 +30,6 @@ Hard caveats:
 - Output text may be sparse or empty
 - Some callback/session attribution is heuristic
 
-## Cobalt Strike
-
-Best for:
-
-- Command chronology
-- Operator workflow interpretation
-- Session-oriented analysis when the normalized fields are populated consistently
-
-Typical caveats:
-
-- Success/error fidelity should be verified from the normalized data before claiming failure-rate conclusions
-- Output richness may vary with the ingest path and source export quality
-
 ## Report Quality Signals
 
 `Core/html_output.py` suppresses some sections when the dataset cannot support them.
@@ -50,7 +37,6 @@ Typical caveats:
 Treat these as mandatory interpretation constraints:
 
 - Warnings about Ghostwriter fidelity
-- Warnings about source fidelity or unknown-heavy status distributions
 - Warnings that most results are `unknown`
 - Suppressed `command-failure-summary`
 - Suppressed `command-retry-success`
