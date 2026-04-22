@@ -13,7 +13,10 @@ TASKS_QUERY = 'query { task(where: { operation_id: { _eq: %s } }) { id display_i
 # Mythic 3.x / Hasura: operation-scoped via task.operation_id.
 INTERACTIVE_MESSAGES_QUERY = 'query { interactive(where: { task: { operation_id: { _eq: %s } } }) { id task_id message_type data timestamp task { id operation_id agent_task_id command_name callback_id callback { display_id sleep_info } } } }'
 
-RESPONSES_QUERY = 'query { response(where: { task: { operation_id: { _eq: %s } } }) { id task_id response_text timestamp } }'
+# Response rows can be very large on long engagements, so Janus pages them by
+# monotonically increasing response.id instead of requesting the whole operation
+# in a single GraphQL result set.
+RESPONSES_PAGE_QUERY = 'query { response(where: { task: { operation_id: { _eq: %s } }, id: { _gt: %s } }, order_by: { id: asc }, limit: %s) { id task_id response_text timestamp } }'
 
 OPERATION_QUERY = 'query { operation(where: { id: { _eq: %s } }) { id name } }'
 

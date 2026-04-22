@@ -32,7 +32,7 @@ from Parsers.Mythic.gql_queries import (
     OPERATION_QUERY,
     PARENT_TASKS_BY_ID_QUERY,
     PREFLIGHT_TASK_QUERY,
-    RESPONSES_QUERY,
+    RESPONSES_PAGE_QUERY,
     TASKS_QUERY,
 )
 from Parsers.Mythic.pty_ingest import (
@@ -40,6 +40,8 @@ from Parsers.Mythic.pty_ingest import (
     build_synthetics_from_interactive_stream,
     group_interactive_by_parent_task_id,
 )
+
+RESPONSES_PAGE_SIZE = 500
 
 
 def slugify(name: str) -> str:
@@ -181,17 +183,38 @@ class MythicPullParser:
 
     def fetch_responses(self, operation_id: int) -> list[dict]:
         """Fetch responses (operator-visible output) for the given operation."""
-        data = self._execute_query(RESPONSES_QUERY % operation_id)
-        if "response" not in data:
-            raise KeyError("GraphQL response missing 'response' key - schema may have changed")
-        rows = data["response"]
-        for row in rows:
-            for field in ("id", "task_id", "response_text", "timestamp"):
-                if field not in row:
-                    raise KeyError(f"Response row missing field '{field}' - schema may have changed")
-            if row["response_text"] is None:
-                raise ValueError("Response row has null 'response_text' - schema may have changed")
-        return rows
+        all_rows: list[dict] = []
+        last_seen_id = 0
+        page_number = 0
+
+        while True:
+            page_number += 1
+            data = self._execute_query(
+                RESPONSES_PAGE_QUERY % (operation_id, last_seen_id, RESPONSES_PAGE_SIZE)
+            )
+            if "response" not in data:
+                raise KeyError("GraphQL response missing 'response' key - schema may have changed")
+            rows = data["response"]
+            for row in rows:
+                for field in ("id", "task_id", "response_text", "timestamp"):
+                    if field not in row:
+                        raise KeyError(f"Response row missing field '{field}' - schema may have changed")
+                if row["response_text"] is None:
+                    raise ValueError("Response row has null 'response_text' - schema may have changed")
+            if self.debug:
+                page_last_id = rows[-1]["id"] if rows else last_seen_id
+                print(
+                    f"DEBUG response page {page_number}: fetched {len(rows)} row(s); last_id={page_last_id}",
+                    file=sys.stderr,
+                )
+            if not rows:
+                break
+            all_rows.extend(rows)
+            last_seen_id = rows[-1]["id"]
+            if len(rows) < RESPONSES_PAGE_SIZE:
+                break
+
+        return all_rows
 
     def fetch_interactive_messages(self, operation_id: int) -> tuple[list[dict], bool]:
         """Fetch interactive PTY message rows when Hasura exposes the ``interactive`` root field.
