@@ -296,11 +296,13 @@ def apply_output_rule_to_results(results: list[ResultEvent], rule: str) -> None:
             res.retention_meta["output_retained"] = OUTPUT_RULE_NONE
             res.retention_meta.update(compute_output_features(res.output_text))
             res.output_text = ""
+            res.pty_output_preface = ""
         elif r == OUTPUT_RULE_ERRORS_ONLY:
             res.retention_meta["output_retained"] = OUTPUT_RULE_ERRORS_ONLY
             if res.status == "success":
                 res.retention_meta.update(compute_output_features(res.output_text))
                 res.output_text = ""
+                res.pty_output_preface = ""
 
 
 def apply_arguments_rule_to_tasks(
@@ -316,16 +318,19 @@ def apply_arguments_rule_to_tasks(
             task.retention_meta["arguments_retained"] = ARGUMENTS_RULE_DROP
             task.retention_meta["arguments_length"] = len(raw)
             task.arguments_raw = ""
+            task.pty_input_raw = ""
         elif r == ARGUMENTS_RULE_HASH:
             task.retention_meta["arguments_retained"] = ARGUMENTS_RULE_HASH
             if raw:
                 task.retention_meta["arguments_digest"] = compute_arguments_digest(raw)
             task.retention_meta["arguments_length"] = len(raw)
             task.arguments_raw = ""
+            task.pty_input_raw = ""
         elif r == ARGUMENTS_RULE_FEATURES_ONLY:
             task.retention_meta["arguments_retained"] = ARGUMENTS_RULE_FEATURES_ONLY
             task.retention_meta.update(compute_arguments_features(raw))
             task.arguments_raw = ""
+            task.pty_input_raw = ""
 
 
 def apply_retention_policy(

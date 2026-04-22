@@ -145,6 +145,16 @@ These are emitted by current first-party parsers and should be treated as the pr
 | `parent_task_id` | Mythic | Parent task for subtask lineage |
 | `orphaned_subtask` | Mythic | True when `parent_task_id` could not be resolved |
 | `c2_task_id` | Ghostwriter, Cobalt Strike REST | Source-side cross-link identifier today; CS REST stores the string `taskId` here for traceability |
+| `pty_synthetic` | Mythic PTY | True for a synthetic shell line inside an interactive PTY session |
+| `pty_session` | Mythic PTY | True for the long-lived parent `pty` launch task |
+| `pty_transport_event` | Mythic PTY | True for raw PTY child transport task rows when they are retained |
+| `pty_parent_task_id` | Mythic PTY | Mythic task id of the parent PTY session |
+| `pty_input_task_id` | Mythic PTY | Mythic child task id used as the fallback source for a synthetic shell line |
+| `pty_sequence` | Mythic PTY | Per-session sequence number used to derive the negative synthetic `task_id` |
+| `pty_input_raw` | Mythic PTY | Full PTY input line; treated as argument-sensitive content by retention rules |
+| `pty_input_message_ids` | Mythic PTY | Interactive table message ids that supplied the PTY input line |
+| `pty_child_count` | Mythic PTY | Count of PTY child task rows under the parent session |
+| `pty_interactive_message_count` | Mythic PTY | Count of interactive rows associated with the parent session |
 
 Important caveats:
 
@@ -179,6 +189,14 @@ Represents tool output or task outcome.
 | --- | --- | --- |
 | `dispatch_failed` | Mythic, partial Mythic | Task failed before reaching the agent |
 | `terminal_inferred_error` | Mythic | Janus promoted a terminal `unknown` to `error` |
+| `pty_synthetic` | Mythic PTY | True for a synthetic result paired with a PTY shell-line task |
+| `pty_parent_task_id` | Mythic PTY | Mythic task id of the parent PTY session |
+| `pty_sequence` | Mythic PTY | Per-session sequence number paired with the synthetic task |
+| `pty_output_message_ids` | Mythic PTY | Interactive table message ids that contributed output/error text |
+| `pty_output_preface` | Mythic PTY | PTY output seen before the first input line; treated as output-sensitive content |
+| `pty_exit_observed` | Mythic PTY | True when an interactive exit message was observed for the session |
+| `pty_exit_timestamp` | Mythic PTY | Timestamp of the interactive exit message |
+| `pty_exit_code` | Mythic PTY | Integer exit code when the exit payload cleanly parses as an integer |
 
 Important caveats:
 

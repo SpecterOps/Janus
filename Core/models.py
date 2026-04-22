@@ -66,6 +66,16 @@ class TaskEvent:
     parent_task_id: int | None = None  # Mythic parent_task_id; set for sub-tasks
     orphaned_subtask: bool = False  # True when parent_task_id is set but parent could not be resolved
     c2_task_id: str = ""  # raw entry_identifier from Ghostwriter; used for Phase 4 cross-linking
+    pty_synthetic: bool = False  # True for synthetic shell lines inside a Mythic PTY session
+    pty_session: bool = False  # True for the long-lived Mythic PTY launch task
+    pty_transport_event: bool = False  # True for Mythic PTY transport child rows
+    pty_parent_task_id: int | None = None
+    pty_input_task_id: int | None = None
+    pty_sequence: int | None = None
+    pty_input_raw: str = ""
+    pty_input_message_ids: list[int] = field(default_factory=list)
+    pty_child_count: int | None = None
+    pty_interactive_message_count: int | None = None
     retention_meta: dict = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict:
@@ -94,6 +104,26 @@ class TaskEvent:
             d["orphaned_subtask"] = True
         if self.c2_task_id:
             d["c2_task_id"] = self.c2_task_id
+        if self.pty_synthetic:
+            d["pty_synthetic"] = True
+        if self.pty_session:
+            d["pty_session"] = True
+        if self.pty_transport_event:
+            d["pty_transport_event"] = True
+        if self.pty_parent_task_id is not None:
+            d["pty_parent_task_id"] = self.pty_parent_task_id
+        if self.pty_input_task_id is not None:
+            d["pty_input_task_id"] = self.pty_input_task_id
+        if self.pty_sequence is not None:
+            d["pty_sequence"] = self.pty_sequence
+        if self.pty_input_raw:
+            d["pty_input_raw"] = self.pty_input_raw
+        if self.pty_input_message_ids:
+            d["pty_input_message_ids"] = self.pty_input_message_ids
+        if self.pty_child_count is not None:
+            d["pty_child_count"] = self.pty_child_count
+        if self.pty_interactive_message_count is not None:
+            d["pty_interactive_message_count"] = self.pty_interactive_message_count
         if self.retention_meta:
             d.update(self.retention_meta)
         return d
@@ -113,6 +143,14 @@ class ResultEvent:
 
     dispatch_failed: bool = False  # True when error occurred before task reached the agent
     terminal_inferred_error: bool = False  # True when parser promoted terminal unknown -> error
+    pty_synthetic: bool = False
+    pty_parent_task_id: int | None = None
+    pty_sequence: int | None = None
+    pty_output_message_ids: list[int] = field(default_factory=list)
+    pty_output_preface: str = ""
+    pty_exit_observed: bool = False
+    pty_exit_timestamp: str = ""
+    pty_exit_code: int | None = None
     retention_meta: dict = field(default_factory=dict, repr=False)
 
     @staticmethod
@@ -144,6 +182,22 @@ class ResultEvent:
             d["dispatch_failed"] = True
         if self.terminal_inferred_error:
             d["terminal_inferred_error"] = True
+        if self.pty_synthetic:
+            d["pty_synthetic"] = True
+        if self.pty_parent_task_id is not None:
+            d["pty_parent_task_id"] = self.pty_parent_task_id
+        if self.pty_sequence is not None:
+            d["pty_sequence"] = self.pty_sequence
+        if self.pty_output_message_ids:
+            d["pty_output_message_ids"] = self.pty_output_message_ids
+        if self.pty_output_preface:
+            d["pty_output_preface"] = self.pty_output_preface
+        if self.pty_exit_observed:
+            d["pty_exit_observed"] = True
+        if self.pty_exit_timestamp:
+            d["pty_exit_timestamp"] = self.pty_exit_timestamp
+        if self.pty_exit_code is not None:
+            d["pty_exit_code"] = self.pty_exit_code
         if self.retention_meta:
             d.update(self.retention_meta)
         return d
