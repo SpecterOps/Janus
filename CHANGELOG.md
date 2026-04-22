@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] — 2026-04-22
+
+### Added
+
+- **Mythic PTY provenance fields**: PTY session, transport, and synthetic shell-line events now emit first-class schema fields instead of hiding PTY metadata in retention dictionaries. New task fields include `pty_session`, `pty_transport_event`, `pty_parent_task_id`, `pty_input_task_id`, `pty_sequence`, `pty_input_raw`, `pty_input_message_ids`, `pty_child_count`, and `pty_interactive_message_count`. New result fields include `pty_sequence`, `pty_output_message_ids`, `pty_output_preface`, `pty_exit_observed`, `pty_exit_timestamp`, and `pty_exit_code`.
+- **Interactive PTY message attribution**: Synthetic PTY task/result pairs now preserve source interactive message IDs for input and output rows, use per-session sequence numbers, and timestamp synthetic results from observed output or exit messages when available.
+- **PTY exit capture**: Mythic interactive stream parsing now records observed PTY exit messages, exit timestamps, and integer exit codes when the exit payload parses cleanly.
+
+### Changed
+
+- **PTY retention handling**: `arguments_rule` now clears `pty_input_raw` alongside `arguments_raw`; `output_rule` now clears `pty_output_preface` alongside `output_text`, preserving privacy expectations for PTY-specific content.
+- **PTY architecture docs**: The normalized event model now documents PTY-specific task and result fields so downstream consumers can rely on the emitted schema.
+
 ## [1.0.1] — 2026-04-20
 
 ### Added

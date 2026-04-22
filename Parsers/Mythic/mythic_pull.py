@@ -318,19 +318,22 @@ class MythicPullParser:
         synthetic_task_events: list[TaskEvent] = []
         synthetic_result_events: list[ResultEvent] = []
         parent_preface: dict[int, str] = {}
+        parent_exit_info: dict[int, dict] = {}
 
         for parent_id in pty_parent_ids:
             parent_row = task_by_id[parent_id]
             children = [c for c in children_by_parent.get(parent_id, []) if c.get("command_name") == "pty"]
             ims = interactive_by_parent.get(parent_id, [])
             if ims:
-                st, sr, _, preface = build_synthetics_from_interactive_stream(
+                st, sr, _, preface, exit_info = build_synthetics_from_interactive_stream(
                     operation_id, parent_row, ims
                 )
                 synthetic_task_events.extend(st)
                 synthetic_result_events.extend(sr)
                 if preface:
                     parent_preface[parent_id] = preface
+                if exit_info:
+                    parent_exit_info[parent_id] = exit_info
                 suppressed_task_ids.update(int(c["id"]) for c in children)
             elif children:
                 st, sr, sup = build_synthetics_from_child_pty_tasks(
@@ -419,24 +422,27 @@ class MythicPullParser:
                 )
 
             task_retention: dict = {}
+            pty_transport_event = False
+            pty_session = False
+            pty_parent_task_id = None
+            pty_child_count = None
+            pty_interactive_message_count = None
             if (
                 parent_task_id is not None
                 and parent_task_id in task_by_id
                 and task_by_id[parent_task_id].get("command_name") == "pty"
                 and raw_command_name == "pty"
             ):
-                task_retention["pty_transport_event"] = True
-                task_retention["pty_parent_task_id"] = parent_task_id
+                pty_transport_event = True
+                pty_parent_task_id = parent_task_id
             if task_id in pty_parent_ids:
-                task_retention["pty_session"] = True
-                task_retention["pty_child_count"] = sum(
+                pty_session = True
+                pty_child_count = sum(
                     1
                     for c in children_by_parent.get(task_id, [])
                     if c.get("command_name") == "pty"
                 )
-                task_retention["pty_interactive_message_count"] = len(
-                    interactive_by_parent.get(task_id, [])
-                )
+                pty_interactive_message_count = len(interactive_by_parent.get(task_id, []))
 
             task_events.append(
                 TaskEvent(
@@ -455,6 +461,11 @@ class MythicPullParser:
                     issued_command_name=issued_command_name,
                     parent_task_id=parent_task_id,
                     orphaned_subtask=orphaned_subtask,
+                    pty_session=pty_session,
+                    pty_transport_event=pty_transport_event,
+                    pty_parent_task_id=pty_parent_task_id,
+                    pty_child_count=pty_child_count,
+                    pty_interactive_message_count=pty_interactive_message_count,
                     retention_meta=task_retention,
                 )
             )
@@ -476,8 +487,7 @@ class MythicPullParser:
             status, dispatch_failed = ResultEvent.determine_status(t["completed"], t["status"])
 
             result_retention: dict = {}
-            if task_id in parent_preface:
-                result_retention["pty_output_preface"] = parent_preface[task_id]
+            exit_info = parent_exit_info.get(task_id, {})
 
             result_events.append(
                 ResultEvent(
@@ -488,6 +498,10 @@ class MythicPullParser:
                     status=status,
                     dispatch_failed=dispatch_failed,
                     output_text=output_text,
+                    pty_output_preface=parent_preface.get(task_id, ""),
+                    pty_exit_observed=bool(exit_info.get("pty_exit_observed")),
+                    pty_exit_timestamp=exit_info.get("pty_exit_timestamp", ""),
+                    pty_exit_code=exit_info.get("pty_exit_code"),
                     retention_meta=result_retention,
                 )
             )

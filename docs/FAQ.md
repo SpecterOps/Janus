@@ -18,9 +18,36 @@ If you prefer not to change `PATH`, call the binary directly:
 & "C:\Program Files\Go\bin\go.exe" build ...
 ```
 
-### `make cli` on Windows does not create `janus-cli.exe`
+### Build `janus-cli.exe` from PowerShell
 
-Use the current `make cli`. It checks the host OS and writes `janus-cli.exe` on Windows. If an old build left a bare `janus-cli` file behind, delete it and rebuild.
+PowerShell does not include `make` by default. If `make cli` reports `The term 'make' is not recognized`, build the Windows executable directly from the Go module under `cmd/janus-cli`:
+
+```powershell
+cd C:\path\to\Janus
+$env:PATH += ";C:\Program Files\Go\bin"
+
+cd .\cmd\janus-cli
+& "C:\Program Files\Go\bin\go.exe" build -ldflags="-s -w -X main.version=1.0.1" -o ..\..\janus-cli.exe .
+
+cd ..\..
+.\janus-cli.exe version
+```
+
+Run `go build` from `cmd\janus-cli`, not the repository root. The repo root is not a Go module, so `go build` there reports `cannot find main module`.
+
+If you are building from WSL or another shell with `make`, use:
+
+```bash
+make cli
+```
+
+To cross-compile every release binary, use the `cli-all` target:
+
+```bash
+make cli-all
+```
+
+Do not run `make cli all`; `all` is not a target in this repository.
 
 ### `go.sum` checksum mismatch
 
@@ -192,7 +219,7 @@ The file must resolve under this repo's `out/` tree so Docker can see it. Analyz
 
 ### Preferred Windows flow
 
-1. Build the CLI once with `make cli`.
+1. Build the CLI once with the PowerShell commands in [Build `janus-cli.exe` from PowerShell](#build-janus-cliexe-from-powershell).
 2. Start Docker Desktop.
 3. Run `.\janus-cli.exe run`, `analyze`, or `status` as needed.
 

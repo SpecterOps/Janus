@@ -96,17 +96,27 @@ def _bytes_to_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def _parse_exit_code(data: bytes) -> int | None:
+    text = _bytes_to_text(data).strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
 def build_synthetics_from_interactive_stream(
     operation_id: int,
     parent_row: dict,
     messages: list[dict],
     *,
     start_sequence: int = 1,
-) -> tuple[list[TaskEvent], list[ResultEvent], list[int], str]:
+) -> tuple[list[TaskEvent], list[ResultEvent], list[int], str, dict[str, Any]]:
     """
     Build synthetic task/result pairs from ordered interactive messages for one PTY parent.
 
-    Returns (task_events, result_events, message_ids_used, preface_output_before_first_command).
+    Returns (task_events, result_events, message_ids_used, preface_output_before_first_command, exit_info).
     """
     messages = sorted(messages, key=lambda r: normalize_timestamp(r.get("timestamp", "")))
     parent_id = int(parent_row["id"])
@@ -118,13 +128,17 @@ def build_synthetics_from_interactive_stream(
     processing_timestamp = normalize_timestamp(processing_ts_raw) if processing_ts_raw else ""
 
     input_buf = bytearray()
+    input_msg_ids: list[int] = []
     preface_parts: list[str] = []
     cmds: list[dict[str, Any]] = []
     msg_ids_used: list[int] = []
+    exit_info: dict[str, Any] = {}
     seq = start_sequence
 
-    def flush_input_buffer(as_eof: bool) -> None:
-        nonlocal seq, input_buf
+    def flush_input_buffer(
+        as_eof: bool, completed_at: str, current_msg_id: int | None = None
+    ) -> None:
+        nonlocal seq, input_buf, input_msg_ids
         lines = _split_lines_from_buffer(input_buf)
         if as_eof and input_buf:
             lines.append(bytes(input_buf))
@@ -135,22 +149,26 @@ def build_synthetics_from_interactive_stream(
             if parsed is None:
                 continue
             cmd_name, args_raw, raw_line = parsed
+            sequence = seq
             stid = make_synthetic_pty_task_id(parent_id, seq)
             seq += 1
-            submitted_ts = parent_row.get("status_timestamp_submitted")
-            task_ts = normalize_timestamp(submitted_ts if submitted_ts else parent_row["timestamp"])
             cmds.append(
                 {
                     "task_id": stid,
+                    "sequence": sequence,
                     "command_name": cmd_name,
                     "arguments_raw": args_raw,
                     "pty_input_raw": raw_line,
+                    "input_message_ids": list(input_msg_ids),
                     "output_parts": [],
+                    "output_message_ids": [],
+                    "output_timestamps": [],
                     "error_observed": False,
-                    "task_timestamp": task_ts,
-                    "msg_ids": [],
+                    "task_timestamp": completed_at,
                 }
             )
+        if lines:
+            input_msg_ids = [current_msg_id] if input_buf and current_msg_id is not None else []
 
     for row in messages:
         mt = row.get("message_type")
@@ -159,13 +177,19 @@ def build_synthetics_from_interactive_stream(
         except (TypeError, ValueError):
             mt_int = -1
         rid = row.get("id")
+        rid_int = int(rid) if rid is not None else None
+        row_ts = normalize_timestamp(row.get("timestamp", ""))
         raw_b = decode_interactive_data(row)
-        if rid is not None:
-            msg_ids_used.append(int(rid))
+        if rid_int is not None:
+            msg_ids_used.append(rid_int)
 
         if mt_int == MSG_INPUT:
+            if rid_int is not None and rid_int not in input_msg_ids:
+                input_msg_ids.append(rid_int)
             input_buf.extend(raw_b)
-            flush_input_buffer(as_eof=False)
+            flush_input_buffer(as_eof=False, completed_at=row_ts, current_msg_id=rid_int)
+            if input_buf and rid_int is not None and rid_int not in input_msg_ids:
+                input_msg_ids.append(rid_int)
         elif mt_int in (MSG_OUTPUT, MSG_ERROR):
             text = _bytes_to_text(raw_b)
             if not cmds:
@@ -173,20 +197,32 @@ def build_synthetics_from_interactive_stream(
                     preface_parts.append(text)
             else:
                 cmds[-1]["output_parts"].append(text)
+                if rid_int is not None:
+                    cmds[-1]["output_message_ids"].append(rid_int)
+                cmds[-1]["output_timestamps"].append(row_ts)
                 if mt_int == MSG_ERROR:
                     cmds[-1]["error_observed"] = True
         elif mt_int == MSG_EXIT:
-            flush_input_buffer(as_eof=True)
+            flush_input_buffer(as_eof=True, completed_at=row_ts, current_msg_id=rid_int)
+            exit_info = {
+                "pty_exit_observed": True,
+                "pty_exit_timestamp": row_ts,
+            }
+            exit_code = _parse_exit_code(raw_b)
+            if exit_code is not None:
+                exit_info["pty_exit_code"] = exit_code
             break
         # control codes (>=4): ignore for command synthesis (v1)
 
-    flush_input_buffer(as_eof=True)
+    final_ts_raw = parent_row.get("status_timestamp_processed") or parent_row.get("timestamp")
+    final_ts = normalize_timestamp(final_ts_raw)
+    flush_input_buffer(as_eof=True, completed_at=exit_info.get("pty_exit_timestamp", final_ts))
     preface = "".join(preface_parts)
 
     task_events: list[TaskEvent] = []
     result_events: list[ResultEvent] = []
 
-    for c in cmds:
+    for i, c in enumerate(cmds):
         te = TaskEvent(
             source="mythic",
             operation_id=operation_id,
@@ -202,32 +238,38 @@ def build_synthetics_from_interactive_stream(
             callback_sleep_info=callback_sleep_info,
             issued_command_name="",
             parent_task_id=parent_id,
-            retention_meta={
-                "pty_synthetic": True,
-                "pty_parent_task_id": parent_id,
-                "pty_input_raw": c.get("pty_input_raw", ""),
-            },
+            pty_synthetic=True,
+            pty_parent_task_id=parent_id,
+            pty_sequence=c["sequence"],
+            pty_input_raw=c.get("pty_input_raw", ""),
+            pty_input_message_ids=c.get("input_message_ids", []),
         )
         task_events.append(te)
 
         out_text = "".join(c["output_parts"])
+        if c["output_timestamps"]:
+            result_ts = c["output_timestamps"][-1]
+        elif i + 1 < len(cmds):
+            result_ts = cmds[i + 1]["task_timestamp"]
+        else:
+            result_ts = exit_info.get("pty_exit_timestamp", c["task_timestamp"])
         res_status: str = "error" if c["error_observed"] else "success"
         result_events.append(
             ResultEvent(
                 source="mythic",
                 operation_id=operation_id,
                 task_id=c["task_id"],
-                timestamp=c["task_timestamp"],
+                timestamp=result_ts,
                 status=res_status,
                 output_text=out_text,
-                retention_meta={
-                    "pty_synthetic": True,
-                    "pty_parent_task_id": parent_id,
-                },
+                pty_synthetic=True,
+                pty_parent_task_id=parent_id,
+                pty_sequence=c["sequence"],
+                pty_output_message_ids=c.get("output_message_ids", []),
             )
         )
 
-    return task_events, result_events, msg_ids_used, preface
+    return task_events, result_events, msg_ids_used, preface, exit_info
 
 
 def build_synthetics_from_child_pty_tasks(
@@ -288,12 +330,11 @@ def build_synthetics_from_child_pty_tasks(
                 callback_sleep_info=ch.get("callback", {}).get("sleep_info") or callback_sleep_info,
                 issued_command_name="pty",
                 parent_task_id=parent_id,
-                retention_meta={
-                    "pty_synthetic": True,
-                    "pty_parent_task_id": parent_id,
-                    "pty_input_task_id": ch_id,
-                    "pty_input_raw": raw_line,
-                },
+                pty_synthetic=True,
+                pty_parent_task_id=parent_id,
+                pty_input_task_id=ch_id,
+                pty_sequence=seq - 1,
+                pty_input_raw=raw_line,
             )
         )
         status_ts = ch.get("status_timestamp_processed")
@@ -308,7 +349,9 @@ def build_synthetics_from_child_pty_tasks(
                 status=status if not dispatch_failed else "error",
                 dispatch_failed=dispatch_failed,
                 output_text="",
-                retention_meta={"pty_synthetic": True, "pty_parent_task_id": parent_id},
+                pty_synthetic=True,
+                pty_parent_task_id=parent_id,
+                pty_sequence=seq - 1,
             )
         )
 

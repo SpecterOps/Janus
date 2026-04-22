@@ -26,12 +26,11 @@ coverage.xml
 *.cover
 .pytest_tmp/
 uv.lock
+Tests/
 
 Config/janus.yml
-Tests/
 # Local virtualenv (uv/pip)
 .venv/
 
 # Local Claude Code permissions
 .claude/settings.local.json
-
