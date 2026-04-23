@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-04-23
+
+### Changed
+
+- **Mythic response pagination hardening**: Janus now fetches Mythic `response` rows in smaller GraphQL pages (`response.id` cursor, ascending order, 500 rows per request) instead of issuing one unbounded operation-wide response query. This reduces the chance of Hasura/Postgres out-of-memory failures when pulling long engagements with large command output while preserving the existing normalized output and CLI behavior.
+
 ## [1.0.2] — 2026-04-22
 
 ### Added
