@@ -10,6 +10,9 @@ mythic:
   # Set to false only for local/lab deployments using self-signed certs
   # when the Janus container/host does not trust that cert or its CA.
   verify_tls: true
+  # Response rows are paged to avoid large Mythic/Hasura responses.
+  # Lower this if individual response_text values are extremely large.
+  response_page_size: 500
   operation_id: 1
 
 ghostwriter:

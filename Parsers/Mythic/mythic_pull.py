@@ -116,11 +116,21 @@ class _LegacyTLSAdapter(HTTPAdapter):
 class MythicPullParser:
     """Pull-mode parser for Mythic C2 GraphQL API."""
 
-    def __init__(self, endpoint: str, api_token: str, verify_tls: bool = True, debug: bool = False):
+    def __init__(
+        self,
+        endpoint: str,
+        api_token: str,
+        verify_tls: bool = True,
+        debug: bool = False,
+        responses_page_size: int = RESPONSES_PAGE_SIZE,
+    ):
+        if responses_page_size < 1:
+            raise ValueError("responses_page_size must be at least 1")
         self.endpoint = endpoint.rstrip("/")
         self.api_token = api_token
         self.verify_tls = verify_tls
         self.debug = debug
+        self.responses_page_size = responses_page_size
         self._last_pty_interactive_query_available = False
         self._session = requests.Session()
         self._session.headers["Content-Type"] = "application/json"
@@ -190,7 +200,7 @@ class MythicPullParser:
         while True:
             page_number += 1
             data = self._execute_query(
-                RESPONSES_PAGE_QUERY % (operation_id, last_seen_id, RESPONSES_PAGE_SIZE)
+                RESPONSES_PAGE_QUERY % (operation_id, last_seen_id, self.responses_page_size)
             )
             if "response" not in data:
                 raise KeyError("GraphQL response missing 'response' key - schema may have changed")
@@ -211,7 +221,7 @@ class MythicPullParser:
                 break
             all_rows.extend(rows)
             last_seen_id = rows[-1]["id"]
-            if len(rows) < RESPONSES_PAGE_SIZE:
+            if len(rows) < self.responses_page_size:
                 break
 
         return all_rows
@@ -618,6 +628,7 @@ class MythicPullParser:
             "status_counts": status_counts,
             "output_rule": rule_applied,
             "arguments_rule": args_rule_applied,
+            "responses_page_size": self.responses_page_size,
             "pty_interactive_query_available": self._last_pty_interactive_query_available,
         }
         write_bundle(metadata, bundle_path, analysis_timestamp)

@@ -32,6 +32,7 @@ cp Config/janus.example.yml Config/janus.yml # set source, redaction settings, e
 ./janus-cli multi-analyze --pattern "out/partial/*/" --output out/combined/ 
 ./janus-cli pull --source cobaltstrike 
 ./janus-cli run --source cobaltstrike 
+./janus-cli run --source mythic --response-page-size 100 # lower Mythic response pagination for huge output rows
 
 ./janus-cli status # display the current ingest/analyze/report state
 ./janus-cli config # print active configuration

@@ -34,6 +34,7 @@ Examples:
   janus-cli run --source ghostwriter                  # full pipeline using Ghostwriter
   janus-cli run --source cobaltstrike                 # full pipeline using Cobalt Strike REST
   janus-cli run --op-id 3                             # full pipeline for operation 3
+  janus-cli run --source mythic --response-page-size 100
   janus-cli pull --source mythic --op-id 2
   janus-cli pull --source cobaltstrike --username operator --password <teamserver-password>
   janus-cli analyze                                   # analyze latest pull
@@ -135,8 +136,13 @@ func cmdPull(args []string) int {
 	insecure := fs.Bool("insecure", false, "Disable TLS verification for the selected source")
 	noBuild := fs.Bool("no-build", false, "Skip Docker image rebuild")
 	debug := fs.Bool("debug", false, "Print request/response for troubleshooting")
+	responsePageSize := fs.Int("response-page-size", 0, "Mythic response rows per GraphQL page (default: config or 500)")
 	dockerNet, dockerAddHost := bindDockerRunFlags(fs)
 	fs.Parse(args)
+	if *responsePageSize < 0 {
+		fmt.Fprintln(os.Stderr, "error: --response-page-size must be >= 1")
+		return 1
+	}
 
 	if !*noBuild {
 		if err := buildImage(); err != nil {
@@ -195,6 +201,9 @@ func cmdPull(args []string) int {
 	}
 	if *debug {
 		dockerArgs = append(dockerArgs, "--debug")
+	}
+	if src == "mythic" && *responsePageSize > 0 {
+		dockerArgs = append(dockerArgs, "--response-page-size", fmt.Sprintf("%d", *responsePageSize))
 	}
 
 	if err := dockerRun(dockerArgs, false, *dockerNet, *dockerAddHost); err != nil {
@@ -484,8 +493,13 @@ func cmdRun(args []string) int {
 	opName := fs.String("operation-name", "", "Cobalt Strike operation/display name")
 	insecure := fs.Bool("insecure", false, "Disable TLS verification for the selected source")
 	noBuild := fs.Bool("no-build", false, "Skip Docker image rebuild")
+	responsePageSize := fs.Int("response-page-size", 0, "Mythic response rows per GraphQL page (default: config or 500)")
 	dockerNet, dockerAddHost := bindDockerRunFlags(fs)
 	fs.Parse(args)
+	if *responsePageSize < 0 {
+		fmt.Fprintln(os.Stderr, "error: --response-page-size must be >= 1")
+		return 1
+	}
 
 	if !*noBuild {
 		if err := buildImage(); err != nil {
@@ -527,6 +541,9 @@ func cmdRun(args []string) int {
 	}
 	if *insecure {
 		pullArgs = append(pullArgs, "--insecure")
+	}
+	if src == "mythic" && *responsePageSize > 0 {
+		pullArgs = append(pullArgs, "--response-page-size", fmt.Sprintf("%d", *responsePageSize))
 	}
 	if n := firstNonEmpty(*dockerNet, globalDockerNetwork); n != "" {
 		pullArgs = append([]string{"--docker-network", n}, pullArgs...)

@@ -85,7 +85,7 @@ from Core.output_rule import (
     resolve_retention_policy,
     RetentionPolicy,
 )
-from Parsers.Mythic.mythic_pull import MythicPullParser, slugify
+from Parsers.Mythic.mythic_pull import MythicPullParser, RESPONSES_PAGE_SIZE, slugify
 from Parsers.Mythic.partial_data_adapter import load_partial_mythic_json
 from Parsers.Ghostwriter.client import GhostwriterSchemaError
 from Parsers.Ghostwriter.ghostwriter_pull import GhostwriterPullParser
@@ -275,11 +275,24 @@ def run_mythic(
     no_versioning: bool = False,
     output_rule_cli: str | None = None,
     arguments_rule_cli: str | None = None,
+    responses_page_size_cli: int | None = None,
 ) -> int:
     """Run Mythic pull-mode parser."""
     mythic_cfg = config.get("mythic", {})
     endpoint = endpoint or mythic_cfg.get("endpoint") or DEFAULT_MYTHIC_ENDPOINT
     api_token = api_token or mythic_cfg.get("api_token")
+    if responses_page_size_cli is not None:
+        responses_page_size = responses_page_size_cli
+    else:
+        responses_page_size = mythic_cfg.get("response_page_size", RESPONSES_PAGE_SIZE)
+    try:
+        responses_page_size = int(responses_page_size)
+    except (TypeError, ValueError):
+        print("error: Mythic response_page_size must be an integer >= 1", file=sys.stderr)
+        return 1
+    if responses_page_size < 1:
+        print("error: Mythic response_page_size must be >= 1", file=sys.stderr)
+        return 1
     if not api_token:
         print(
             "error: API token required. Set --api-token or mythic.api_token in config.",
@@ -291,7 +304,13 @@ def run_mythic(
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    parser = MythicPullParser(endpoint=endpoint, api_token=api_token, verify_tls=verify_tls, debug=debug)
+    parser = MythicPullParser(
+        endpoint=endpoint,
+        api_token=api_token,
+        verify_tls=verify_tls,
+        debug=debug,
+        responses_page_size=responses_page_size,
+    )
 
     print("Preflight: connectivity/auth (Mythic)...")
     try:
@@ -1714,6 +1733,15 @@ def _cli() -> int:
             "features_only (derived metadata without raw content)"
         ),
     )
+    run_parser.add_argument(
+        "--response-page-size",
+        type=int,
+        default=None,
+        help=(
+            f"Mythic response rows to fetch per GraphQL page (default: config mythic.response_page_size or {RESPONSES_PAGE_SIZE}; "
+            "lower this for very large response_text values)"
+        ),
+    )
 
     # -- analyze subcommand ---------------------------------------------------
     analyze_parser = subparsers.add_parser("analyze", help="Run an analyzer on existing events")
@@ -2043,6 +2071,7 @@ def _cli() -> int:
                 no_versioning=args.no_versioning,
                 output_rule_cli=args.output_rule,
                 arguments_rule_cli=args.arguments_rule,
+                responses_page_size_cli=args.response_page_size,
             )
         elif source == "ghostwriter":
             oplog_id = args.oplog_id or args.operation_id

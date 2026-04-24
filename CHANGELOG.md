@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-04-24
+
+### Added
+
+- **Configurable Mythic response pagination**: Added `--response-page-size` for Mythic `pull` / `run` workflows and `mythic.response_page_size` in config so large `response_text` rows can be pulled with smaller GraphQL pages. Pull metadata now records the resolved `responses_page_size`.
+
 ## [1.0.3] - 2026-04-23
 
 ### Changed

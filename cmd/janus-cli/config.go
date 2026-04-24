@@ -32,10 +32,11 @@ type DockerCfg struct {
 }
 
 type MythicCfg struct {
-	Endpoint    string `yaml:"endpoint"`
-	APIToken    string `yaml:"api_token"`
-	VerifyTLS   *bool  `yaml:"verify_tls"`
-	OperationID int    `yaml:"operation_id"`
+	Endpoint         string `yaml:"endpoint"`
+	APIToken         string `yaml:"api_token"`
+	VerifyTLS        *bool  `yaml:"verify_tls"`
+	OperationID      int    `yaml:"operation_id"`
+	ResponsePageSize int    `yaml:"response_page_size"`
 }
 
 type GhostwriterCfg struct {

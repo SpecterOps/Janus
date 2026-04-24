@@ -300,6 +300,7 @@ func cmdConfig() int {
 	fmt.Printf("Mythic API token:    %s\n", maskToken(cfg.Mythic.APIToken))
 	fmt.Printf("Mythic operation ID: %s\n", intOrNotSet(cfg.Mythic.OperationID))
 	fmt.Printf("Mythic verify TLS:   %v\n", resolveBool(cfg.Mythic.VerifyTLS, true))
+	fmt.Printf("Mythic response page size: %s\n", intOrDefault(cfg.Mythic.ResponsePageSize, "500"))
 	fmt.Printf("Ghostwriter endpoint: %s\n", orDefault(cfg.Ghostwriter.Endpoint, "(not set)"))
 	fmt.Printf("Ghostwriter API token: %s\n", maskToken(cfg.Ghostwriter.APIToken))
 	fmt.Printf("Ghostwriter oplog ID:  %s\n", intOrNotSet(cfg.Ghostwriter.OplogID))
@@ -326,6 +327,13 @@ func orDefault(s, def string) string {
 func intOrNotSet(n int) string {
 	if n == 0 {
 		return "(not set)"
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+func intOrDefault(n int, fallback string) string {
+	if n == 0 {
+		return fallback
 	}
 	return fmt.Sprintf("%d", n)
 }

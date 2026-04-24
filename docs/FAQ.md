@@ -165,6 +165,24 @@ Set `output_rule: errors_only` in `Config/janus.yml`. On the next pull (or when 
 
 Check `bundle.json` for `output_rule` to see what was applied for that run.
 
+### Mythic pulls fail on very large response rows
+
+Janus pages Mythic `response` rows at 500 rows per GraphQL request by default. If a deployment has unusually large `response_text` values, lower the page size:
+
+```powershell
+./janus-cli pull --source mythic --response-page-size 100
+./janus-cli run --source mythic --response-page-size 100
+```
+
+You can also set it manually in `Config/janus.yml`:
+
+```yaml
+mythic:
+  response_page_size: 100
+```
+
+`bundle.json` records the resolved `responses_page_size` used for that pull.
+
 ## Privacy and retention
 
 ### How do I strip sensitive arguments from stored events?
