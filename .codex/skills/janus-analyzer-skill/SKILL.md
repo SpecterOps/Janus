@@ -67,5 +67,3 @@ When answering the user, produce:
 ## References
 
 - `docs/architecture.md`
-- `docs/partial-data.md`
-- `docs/ghostwriter-api-reference.md`
