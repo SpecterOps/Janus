@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-06-05
+
+### Added
+
+- **Outflank implant log ingest**: Added a local Outflank parser for line-oriented implant log files. The parser normalizes `task_request` / `task_response` records into Janus task and result events, derives stable numeric IDs from Outflank UIDs, tracks implant/log parsing metadata, infers simple result status, and writes standard `events.ndjson` / `bundle.json` artifacts with output and argument retention rules applied.
+
 ## [1.0.4] - 2026-04-24
 
 ### Added

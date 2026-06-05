@@ -10,7 +10,7 @@ import (
 
 // version is set at build time via -ldflags "-X main.version=v1.2.3" (e.g. GitHub release workflow).
 // Default should match [project].version in pyproject.toml (bundles use get_janus_version()).
-var version = "1.0.0"
+var version = "1.1.0"
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `janus-cli — Janus operator CLI
@@ -19,7 +19,7 @@ Usage: janus-cli <command> [options]
 
 Commands:
   build          Build the Docker image
-  pull           Pull data from Mythic, Ghostwriter, or Cobalt Strike
+  pull           Pull data from Mythic, Ghostwriter, Cobalt Strike, or Outflank
   analyze        Run analyzers against the latest pull (or --events <path>)
   report         Generate HTML report from the latest analysis
   run            Pull + analyze + report in one shot for any supported source
@@ -33,6 +33,7 @@ Examples:
   janus-cli run                                       # full pipeline for the configured source
   janus-cli run --source ghostwriter                  # full pipeline using Ghostwriter
   janus-cli run --source cobaltstrike                 # full pipeline using Cobalt Strike REST
+  janus-cli run --source outflank --log-path out/input/TSO8IEAB.json
   janus-cli run --op-id 3                             # full pipeline for operation 3
   janus-cli run --source mythic --response-page-size 100
   janus-cli pull --source mythic --op-id 2
@@ -125,14 +126,15 @@ func cmdBuild(_ []string) int {
 
 func cmdPull(args []string) int {
 	fs := flag.NewFlagSet("pull", flag.ExitOnError)
-	source := fs.String("source", "", "Data source: mythic, ghostwriter, or cobaltstrike")
-	opID := fs.Int("op-id", 0, "Operation/oplog ID (Cobalt Strike uses a synthetic operation ID)")
+	source := fs.String("source", "", "Data source: mythic, ghostwriter, cobaltstrike, or outflank")
+	opID := fs.Int("op-id", 0, "Operation/oplog ID (Cobalt Strike and Outflank use a synthetic operation ID)")
 	endpoint := fs.String("endpoint", "", "Override source endpoint/base URL")
 	apiToken := fs.String("api-token", "", "Override source API token/bearer token")
 	username := fs.String("username", "", "Override Cobalt Strike username")
 	password := fs.String("password", "", "Override Cobalt Strike password")
 	durationMS := fs.Int("duration-ms", 0, "Cobalt Strike REST login token lifetime in ms")
-	opName := fs.String("operation-name", "", "Cobalt Strike operation/display name")
+	opName := fs.String("operation-name", "", "Cobalt Strike or Outflank operation/display name")
+	logPath := fs.String("log-path", "", "Outflank implant log file or directory under out/")
 	insecure := fs.Bool("insecure", false, "Disable TLS verification for the selected source")
 	noBuild := fs.Bool("no-build", false, "Skip Docker image rebuild")
 	debug := fs.Bool("debug", false, "Print request/response for troubleshooting")
@@ -166,6 +168,9 @@ func cmdPull(args []string) int {
 
 	if src == "cobaltstrike" {
 		return cmdPullCobaltStrike(cfg, *endpoint, *username, *password, *apiToken, *durationMS, tid, *opName, *insecure, *debug, *dockerNet, *dockerAddHost)
+	}
+	if src == "outflank" {
+		return cmdPullOutflank(cfg, *logPath, tid, *opName, *debug, *dockerNet, *dockerAddHost)
 	}
 
 	if tid == 0 {
@@ -291,6 +296,61 @@ func cmdPullCobaltStrike(cfg *Config, endpoint string, username string, password
 	if debug {
 		dockerArgs = append(dockerArgs, "--debug")
 	}
+
+	if err := dockerRun(dockerArgs, false, dockerNet, dockerAddHost); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func resolveOutflankInputs(cfg *Config, logPath string, opID int, opName string) (string, int, string) {
+	lp := strings.TrimSpace(logPath)
+	if lp == "" {
+		lp = strings.TrimSpace(cfg.Outflank.LogPath)
+	}
+
+	resolvedOpID := opID
+	if resolvedOpID == 0 && cfg.Outflank.OperationID != 0 {
+		resolvedOpID = cfg.Outflank.OperationID
+	}
+
+	oname := strings.TrimSpace(opName)
+	if oname == "" {
+		oname = strings.TrimSpace(cfg.Outflank.OperationName)
+	}
+
+	return lp, resolvedOpID, oname
+}
+
+func cmdPullOutflank(cfg *Config, logPath string, opID int, opName string, debug bool, dockerNet string, dockerAddHost string) int {
+	lp, resolvedOpID, oname := resolveOutflankInputs(cfg, logPath, opID, opName)
+	if lp == "" {
+		fmt.Fprintln(os.Stderr, "error: Outflank log path required for outflank pull: use --log-path or set outflank.log_path in Config/janus.yml")
+		fmt.Fprintln(os.Stderr, "hint: janus-cli only mounts ./out into Docker; put copied logs under out/input/ or another out/ subdirectory.")
+		return 1
+	}
+
+	containerLogPath, err := resolveAnyPathUnderOutForDocker(lp, true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: Outflank log path must be an existing file or directory under out/: %v\n", err)
+		return 1
+	}
+
+	dockerArgs := []string{
+		"outflank-load",
+		containerLogPath,
+		"--config", "/config/janus.yml",
+		"--out-dir", "out/complete",
+		"--no-analyzers",
+	}
+	if resolvedOpID != 0 {
+		dockerArgs = append(dockerArgs, "--operation-id", fmt.Sprintf("%d", resolvedOpID))
+	}
+	if oname != "" {
+		dockerArgs = append(dockerArgs, "--operation-name", oname)
+	}
+	_ = debug
 
 	if err := dockerRun(dockerArgs, false, dockerNet, dockerAddHost); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -483,14 +543,15 @@ func cmdReport(args []string) int {
 
 func cmdRun(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	source := fs.String("source", "", "Data source: mythic, ghostwriter, or cobaltstrike")
-	opID := fs.Int("op-id", 0, "Operation/oplog ID (Cobalt Strike uses a synthetic operation ID)")
+	source := fs.String("source", "", "Data source: mythic, ghostwriter, cobaltstrike, or outflank")
+	opID := fs.Int("op-id", 0, "Operation/oplog ID (Cobalt Strike and Outflank use a synthetic operation ID)")
 	endpoint := fs.String("endpoint", "", "Override source endpoint/base URL")
 	apiToken := fs.String("api-token", "", "Override source API token/bearer token")
 	username := fs.String("username", "", "Override Cobalt Strike username")
 	password := fs.String("password", "", "Override Cobalt Strike password")
 	durationMS := fs.Int("duration-ms", 0, "Cobalt Strike REST login token lifetime in ms")
-	opName := fs.String("operation-name", "", "Cobalt Strike operation/display name")
+	opName := fs.String("operation-name", "", "Cobalt Strike or Outflank operation/display name")
+	logPath := fs.String("log-path", "", "Outflank implant log file or directory under out/")
 	insecure := fs.Bool("insecure", false, "Disable TLS verification for the selected source")
 	noBuild := fs.Bool("no-build", false, "Skip Docker image rebuild")
 	responsePageSize := fs.Int("response-page-size", 0, "Mythic response rows per GraphQL page (default: config or 500)")
@@ -538,6 +599,9 @@ func cmdRun(args []string) int {
 	}
 	if strings.TrimSpace(*opName) != "" {
 		pullArgs = append(pullArgs, "--operation-name", strings.TrimSpace(*opName))
+	}
+	if strings.TrimSpace(*logPath) != "" {
+		pullArgs = append(pullArgs, "--log-path", strings.TrimSpace(*logPath))
 	}
 	if *insecure {
 		pullArgs = append(pullArgs, "--insecure")

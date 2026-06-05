@@ -19,6 +19,7 @@ type Config struct {
 	Mythic       MythicCfg       `yaml:"mythic"`
 	Ghostwriter  GhostwriterCfg  `yaml:"ghostwriter"`
 	CobaltStrike CobaltStrikeCfg `yaml:"cobaltstrike"`
+	Outflank     OutflankCfg     `yaml:"outflank"`
 	// Docker configures extra `docker run` flags when janus-cli launches the Janus container.
 	// Precedence for --network: CLI (--docker-network) overrides docker.network_mode, which
 	// overrides JANUS_DOCKER_RUN_EXTRA. See docs/FAQ.md.
@@ -57,6 +58,13 @@ type CobaltStrikeCfg struct {
 	OperationID   int    `yaml:"operation_id"`
 	OperationName string `yaml:"operation_name"`
 	VerifyTLS     *bool  `yaml:"verify_tls"`
+}
+
+// OutflankCfg mirrors Config/janus.yml keys used by janus-cli pull/run for local Outflank implant logs.
+type OutflankCfg struct {
+	LogPath       string `yaml:"log_path"`
+	OperationID   int    `yaml:"operation_id"`
+	OperationName string `yaml:"operation_name"`
 }
 
 // ---------------------------------------------------------------------------
@@ -129,19 +137,23 @@ func resolveSource(argSource string, cfg *Config) string {
 
 	if cfg != nil {
 		s := cfg.Source
-		if s == "mythic" || s == "ghostwriter" || s == "cobaltstrike" {
+		if s == "mythic" || s == "ghostwriter" || s == "cobaltstrike" || s == "outflank" {
 			return s
 		}
 
 		hasMythic := hasMythicPullConfig(cfg)
 		hasGhostwriter := hasGhostwriterPullConfig(cfg)
 		hasCobaltStrike := hasCobaltStrikePullConfig(cfg)
+		hasOutflank := hasOutflankPullConfig(cfg)
 
 		if hasGhostwriter && !hasMythic {
 			return "ghostwriter"
 		}
 		if hasCobaltStrike && !hasMythic && !hasGhostwriter {
 			return "cobaltstrike"
+		}
+		if hasOutflank && !hasMythic && !hasGhostwriter && !hasCobaltStrike {
+			return "outflank"
 		}
 	}
 
@@ -160,6 +172,9 @@ func resolveTargetID(source string, argOpID int, cfg *Config) int {
 	}
 	if source == "cobaltstrike" {
 		return cfg.CobaltStrike.OperationID
+	}
+	if source == "outflank" {
+		return cfg.Outflank.OperationID
 	}
 	return cfg.Mythic.OperationID
 }
@@ -244,6 +259,16 @@ func hasCobaltStrikePullConfig(cfg *Config) bool {
 		cs.OperationID != 0
 }
 
+func hasOutflankPullConfig(cfg *Config) bool {
+	if cfg == nil {
+		return false
+	}
+	of := cfg.Outflank
+	return of.LogPath != "" ||
+		of.OperationID != 0 ||
+		of.OperationName != ""
+}
+
 // ensureOutPrefix prepends "out/" if the path doesn't already start with it.
 func ensureOutPrefix(p string) string {
 	p = filepath.ToSlash(p)
@@ -254,6 +279,14 @@ func ensureOutPrefix(p string) string {
 }
 
 func resolvePathUnderOutForDocker(userPath string, mustExist bool, expectDir bool) (string, error) {
+	return resolvePathUnderOutForDockerKind(userPath, mustExist, &expectDir)
+}
+
+func resolveAnyPathUnderOutForDocker(userPath string, mustExist bool) (string, error) {
+	return resolvePathUnderOutForDockerKind(userPath, mustExist, nil)
+}
+
+func resolvePathUnderOutForDockerKind(userPath string, mustExist bool, expectDir *bool) (string, error) {
 	if userPath == "" {
 		return "", fmt.Errorf("path is empty")
 	}
@@ -278,10 +311,10 @@ func resolvePathUnderOutForDocker(userPath string, mustExist bool, expectDir boo
 		if statErr != nil {
 			return "", fmt.Errorf("path not found: %s", userPath)
 		}
-		if expectDir && !info.IsDir() {
+		if expectDir != nil && *expectDir && !info.IsDir() {
 			return "", fmt.Errorf("path is not a directory: %s", userPath)
 		}
-		if !expectDir && info.IsDir() {
+		if expectDir != nil && !*expectDir && info.IsDir() {
 			return "", fmt.Errorf("path is a directory (expected file): %s", userPath)
 		}
 	}

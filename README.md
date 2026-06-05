@@ -21,7 +21,7 @@ cp Config/janus.example.yml Config/janus.yml # set source, redaction settings, e
 
 ```bash
 ./janus-cli run # full execution of the ingest, analyze, and report pipeline for the configured source
-./janus-cli pull # ingest Mythic, Ghostwriter, or Cobalt Strike logs from sources defined in config
+./janus-cli pull # ingest Mythic, Ghostwriter, Cobalt Strike, or Outflank logs from sources defined in config
 ./janus-cli analyze # analyze all previously ingested logs
 ./janus-cli report # generate an HTML report from latest analysis
 
@@ -32,6 +32,7 @@ cp Config/janus.example.yml Config/janus.yml # set source, redaction settings, e
 ./janus-cli multi-analyze --pattern "out/partial/*/" --output out/combined/ 
 ./janus-cli pull --source cobaltstrike 
 ./janus-cli run --source cobaltstrike 
+./janus-cli run --source outflank --log-path out/input/TSO8IEAB.json
 ./janus-cli run --source mythic --response-page-size 100 # lower Mythic response pagination for huge output rows
 
 ./janus-cli status # display the current ingest/analyze/report state

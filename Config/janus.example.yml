@@ -41,3 +41,15 @@ cobaltstrike:
   operation_id: 0
   operation_name: ""
   verify_tls: true
+
+# Outflank per-implant log files.
+# Each beacon writes its own line-oriented JSON log, commonly at:
+# /opt/outflank/shared/logs/api/implant_logs/json/<implant_uid>.json
+#
+# For janus-cli/Docker usage, copy or mount the log file(s) under ./out first
+# because only ./out and ./Config are mounted into the Janus container by default.
+# Example: log_path: "out/input/TSO8IEAB.json"
+outflank:
+  log_path: ""
+  operation_id: 0
+  operation_name: ""

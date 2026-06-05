@@ -27,7 +27,7 @@ cd C:\path\to\Janus
 $env:PATH += ";C:\Program Files\Go\bin"
 
 cd .\cmd\janus-cli
-& "C:\Program Files\Go\bin\go.exe" build -ldflags="-s -w -X main.version=1.0.1" -o ..\..\janus-cli.exe .
+& "C:\Program Files\Go\bin\go.exe" build -ldflags="-s -w -X main.version=1.1.0" -o ..\..\janus-cli.exe .
 
 cd ..\..
 .\janus-cli.exe version
@@ -151,11 +151,23 @@ pip install -r requirements.txt
 
 Direct `python janus.py` is mainly for development. The recommended path is `janus-cli`, which builds the Docker image and handles mounts for you. Cobalt Strike ingest uses the REST workflow behind `./janus-cli pull --source cobaltstrike` and `./janus-cli run --source cobaltstrike`. Configure `cobaltstrike:` in `Config/janus.yml` or pass `--endpoint` / `--api-token` / credentials as flags; if you provide username/password, Janus logs in first and reuses the returned bearer token automatically.
 
+### How do I ingest Outflank implant logs?
+
+Copy the per-beacon log file or directory under `out/`, then point Janus at that path:
+
+```bash
+mkdir -p out/input
+cp /opt/outflank/shared/logs/api/implant_logs/json/TSO8IEAB.json out/input/
+./janus-cli run --source outflank --log-path out/input/TSO8IEAB.json
+```
+
+`janus-cli` mounts only `./out` and `./Config` into the container by default, so paths outside `out/` are not visible to the Dockerized Python runtime. The direct Python entrypoint also supports `outflank-load <log_path>` for development or custom container mounts.
+
 ## Payload size and `output_rule`
 
 ### My `events.ndjson` is huge (base64 / long success output)
 
-Set `output_rule: errors_only` in `Config/janus.yml`. On the next pull (or when re-normalizing with the Python CLI’s `--output-rule errors_only` on `run`, `partial-load`, or `ghostwriter-load`), Janus clears `output_text` only for results with `status: success`, which drops most bulk from large successful returns while keeping error and unknown transcripts. To drop all output regardless of status, use `output_rule: none`.
+Set `output_rule: errors_only` in `Config/janus.yml`. On the next pull (or when re-normalizing with the Python CLI’s `--output-rule errors_only` on `run`, `partial-load`, `ghostwriter-load`, or `outflank-load`), Janus clears `output_text` only for results with `status: success`, which drops most bulk from large successful returns while keeping error and unknown transcripts. To drop all output regardless of status, use `output_rule: none`.
 
 **Caveats:**
 
@@ -218,7 +230,7 @@ If you merge runs with different settings, the merged `bundle.json` records `out
 
 ### Does Janus send data to any external service?
 
-No. Janus does not use LLMs, cloud analytics, or telemetry services. Network access is limited to the source systems you configure for data collection (Mythic, Ghostwriter, or Cobalt Strike REST endpoints). See [docs/architecture.md — Privacy](architecture.md#privacy) for the full data handling model.
+No. Janus does not use LLMs, cloud analytics, or telemetry services. Network access is limited to the source systems you configure for data collection (Mythic, Ghostwriter, or Cobalt Strike REST endpoints). Outflank implant-log ingestion is offline/local file ingestion. See [docs/architecture.md — Privacy](architecture.md#privacy) for the full data handling model.
 
 ## Existing Events
 

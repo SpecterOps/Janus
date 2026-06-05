@@ -95,11 +95,16 @@ from Parsers.CobaltStrike.cobalt_strike_rest import (
     slugify as cs_slugify,
     run_cobaltstrike_rest_ingest,
 )
-
+from Parsers.Outflank.outflank_log import (
+    default_operation_name as outflank_default_operation_name,
+    run_outflank_log_ingest,
+    slugify as outflank_slugify,
+)
 
 DEFAULT_MYTHIC_ENDPOINT = "https://10.0.0.217:7443/graphql/"
 DEFAULT_GHOSTWRITER_ENDPOINT = "https://127.0.0.1"
 DEFAULT_COBALT_STRIKE_REST_ENDPOINT = "https://127.0.0.1:50050"
+DEFAULT_OUTFLANK_LOG_PATH = "/opt/outflank/shared/logs/api/implant_logs/json"
 DEFAULT_CONFIG_PATH = Path("Config/janus.yml")
 GW_API_TOKEN_ENV = "GHOSTWRITER_API_KEY"
 
@@ -196,17 +201,20 @@ def _resolve_cli_source(config: dict, requested_source: str | None) -> str:
         return requested_source
 
     configured = config.get("source")
-    if configured in {"mythic", "ghostwriter", "cobaltstrike"}:
+    if configured in {"mythic", "ghostwriter", "cobaltstrike", "outflank"}:
         return configured
 
     has_mythic = bool(config.get("mythic"))
     has_ghostwriter = bool(config.get("ghostwriter"))
     has_cobaltstrike = bool(config.get("cobaltstrike"))
+    has_outflank = bool(config.get("outflank"))
 
     if has_ghostwriter and not has_mythic:
         return "ghostwriter"
     if has_cobaltstrike and not has_mythic and not has_ghostwriter:
         return "cobaltstrike"
+    if has_outflank and not has_mythic and not has_ghostwriter and not has_cobaltstrike:
+        return "outflank"
     return "mythic"
 
 
@@ -776,6 +784,7 @@ def run_analyze(
     # Enrich with operation metadata if available
     for key in ("operation_id", "operation_name", "operation_slug",
                 "mythic_endpoint", "ghostwriter_endpoint",
+                "cobaltstrike_rest_endpoint", "outflank_log_path",
                 "analysis_version", "analysis_timestamp",
                 "janus_version"):
         if key in bundle_metadata:
@@ -1299,6 +1308,144 @@ def run_cobaltstrike_rest_load(
     return 0
 
 
+def run_outflank_load(
+    log_path: Path | None,
+    operation_id: int | None,
+    operation_name: str | None,
+    out_dir: Path,
+    no_versioning: bool = False,
+    run_analyzers: bool = True,
+    config: dict | None = None,
+    output_rule_cli: str | None = None,
+    arguments_rule_cli: str | None = None,
+) -> int:
+    """Load local Outflank implant log file(s), normalize, run analyzers, and generate HTML."""
+    cfg = config or {}
+    outflank_cfg = cfg.get("outflank", {})
+    configured_log_path = outflank_cfg.get("log_path") or DEFAULT_OUTFLANK_LOG_PATH
+    resolved_log_path = Path(log_path or configured_log_path)
+    if not resolved_log_path.exists():
+        print(f"error: Outflank log path not found: {resolved_log_path}", file=sys.stderr)
+        return 1
+
+    if operation_id is None:
+        try:
+            operation_id = int(outflank_cfg.get("operation_id") or 0)
+        except (TypeError, ValueError):
+            print("error: outflank.operation_id must be an integer", file=sys.stderr)
+            return 1
+
+    op_name = (
+        operation_name
+        or outflank_cfg.get("operation_name")
+        or outflank_default_operation_name(resolved_log_path)
+    )
+    op_slug = outflank_slugify(op_name)
+
+    print(f"Loading Outflank log(s) from: {resolved_log_path}")
+    print(f"Operation: {op_name} (ID: {operation_id}, slug: {op_slug})")
+
+    analysis_timestamp = datetime.now(timezone.utc)
+
+    if no_versioning:
+        target_dir = out_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        target_dir = get_versioned_output_dir(out_dir, op_slug, analysis_timestamp)
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+    policy = resolve_retention_policy(cfg, output_rule_cli, arguments_rule_cli)
+    try:
+        metadata = run_outflank_log_ingest(
+            log_path=resolved_log_path,
+            operation_id=operation_id,
+            operation_name=op_name,
+            out_dir=target_dir,
+            analysis_timestamp=analysis_timestamp,
+            output_rule=policy.output_rule,
+            arguments_rule=policy.arguments_rule,
+        )
+    except Exception as exc:
+        print(f"error: Outflank ingest failed: {exc}", file=sys.stderr)
+        return 1
+
+    if not no_versioning:
+        create_latest_symlink(out_dir, target_dir)
+
+    task_count = metadata["task_count"]
+    result_count = metadata["result_count"]
+    status_counts = metadata["status_counts"]
+
+    print(f"Output directory: {target_dir}")
+    print(f"Log files loaded: {metadata['log_file_count']}")
+    print(f"Tasks loaded:   {task_count}")
+    print(f"Results loaded: {result_count}")
+    print(
+        f"Status: success={status_counts['success']}, error={status_counts['error']}, "
+        f"unknown={status_counts['unknown']}"
+    )
+    if metadata.get("malformed_line_count") or metadata.get("bad_json_count"):
+        print(
+            f"Skipped malformed lines: {metadata.get('malformed_line_count', 0)}, "
+            f"bad JSON lines: {metadata.get('bad_json_count', 0)}",
+            file=sys.stderr,
+        )
+
+    if run_analyzers:
+        print("\nRunning analyzers...")
+        events_path = target_dir / "events.ndjson"
+        task_events, result_events = load_events(events_path)
+        analyzer_context = _build_runtime_analyzer_context(target_dir)
+        bundle_path = target_dir / "bundle.json"
+        with bundle_path.open(encoding="utf-8") as f:
+            bundle_metadata = json.load(f)
+        analyzers_to_run = [
+            (name, ANALYZER_FUNCTIONS[name], ANALYZER_OUTPUTS[name])
+            for name in PARTIAL_LOAD_ANALYZERS
+        ]
+        for analyzer_name, analyzer_func, output_filename in analyzers_to_run:
+            print(f"  Running {analyzer_name}...")
+            try:
+                result = _run_analyzer(
+                    analyzer_name, analyzer_func, task_events, result_events, analyzer_context
+                )
+                result = _merge_common_metadata(result, {
+                    "analyzer": analyzer_name,
+                    "metadata": {
+                        "events_analyzed": len(task_events) + len(result_events),
+                    },
+                })
+                for key in ("operation_id", "operation_name", "operation_slug",
+                            "analysis_version", "analysis_timestamp", "janus_version",
+                            "outflank_log_path"):
+                    if key in bundle_metadata:
+                        result["metadata"][key] = bundle_metadata[key]
+                out_path = target_dir / output_filename
+                with out_path.open("w", encoding="utf-8") as f:
+                    json.dump(result, f, indent=2, ensure_ascii=False)
+                print(f"    - {out_path}")
+            except Exception as e:
+                print(f"    ! Failed: {e}", file=sys.stderr)
+
+        print("\nGenerating HTML report...")
+        html_path = target_dir / "report.html"
+        try:
+            run_html(target_dir, html_path, include_version_links=True)
+        except Exception as e:
+            print(f"error: failed to generate HTML report: {e}", file=sys.stderr)
+            return 1
+
+        report_path = target_dir / "report.html"
+        print(f"\n- Complete! Report: {report_path}")
+        print(f"Open report: {_format_file_uri(report_path)}")
+    else:
+        print("\n- Ingest complete (analyzers skipped; no report.html yet).")
+        print(f"  Events: {target_dir / 'events.ndjson'}")
+        print(f"  Bundle: {target_dir / 'bundle.json'}")
+        print("  Next: janus-cli analyze && janus-cli report")
+    return 0
+
+
 def run_merge(
     input_paths: list[Path],
     output_dir: Path,
@@ -1626,7 +1773,7 @@ def _cli() -> int:
     run_parser = subparsers.add_parser("run", help="Run a parser for a given source")
     run_parser.add_argument(
         "--source",
-        choices=["mythic", "ghostwriter", "cobaltstrike"],
+        choices=["mythic", "ghostwriter", "cobaltstrike", "outflank"],
         default=None,
         help="Data source to pull from (default: config source or inferred)",
     )
@@ -1634,7 +1781,7 @@ def _cli() -> int:
         "--operation-id",
         type=int,
         default=None,
-        help="Operation/oplog ID to pull (required for mythic; for ghostwriter use --oplog-id; synthetic operation_id for cobaltstrike)",
+        help="Operation/oplog ID to pull (required for mythic; for ghostwriter use --oplog-id; synthetic operation_id for cobaltstrike/outflank)",
     )
     run_parser.add_argument(
         "--oplog-id",
@@ -1650,7 +1797,8 @@ def _cli() -> int:
             "Source endpoint/base URL "
             f"(Mythic default: {DEFAULT_MYTHIC_ENDPOINT}; "
             f"Ghostwriter default: {DEFAULT_GHOSTWRITER_ENDPOINT}/v1/graphql; "
-            f"Cobalt Strike default: {DEFAULT_COBALT_STRIKE_REST_ENDPOINT})"
+            f"Cobalt Strike default: {DEFAULT_COBALT_STRIKE_REST_ENDPOINT}; "
+            "unused for Outflank offline logs)"
         ),
     )
     run_parser.add_argument(
@@ -1684,7 +1832,16 @@ def _cli() -> int:
         "--operation-name",
         type=str,
         default=None,
-        help="Cobalt Strike operation/display name override",
+        help="Cobalt Strike or Outflank operation/display name override",
+    )
+    run_parser.add_argument(
+        "--log-path",
+        type=Path,
+        default=None,
+        help=(
+            "Outflank implant log file or directory "
+            f"(default: config outflank.log_path or {DEFAULT_OUTFLANK_LOG_PATH})"
+        ),
     )
     run_parser.add_argument(
         "--insecure",
@@ -1984,6 +2141,62 @@ def _cli() -> int:
         help="Override arguments_rule from config (see run --arguments-rule)",
     )
 
+    outflank_load_parser = subparsers.add_parser(
+        "outflank-load",
+        help="Normalize local Outflank implant log file(s) into events.ndjson",
+    )
+    outflank_load_parser.add_argument(
+        "log_path",
+        type=Path,
+        help="Path to an Outflank implant log file or directory of *.json logs",
+    )
+    outflank_load_parser.add_argument(
+        "--operation-id",
+        type=int,
+        default=None,
+        help="Synthetic operation ID for Janus joins/merge (default: outflank.operation_id or 0)",
+    )
+    outflank_load_parser.add_argument(
+        "--operation-name",
+        type=str,
+        default=None,
+        help="Operation/display name for output paths",
+    )
+    outflank_load_parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=Path("out/partial"),
+        help="Output directory (default: out/partial)",
+    )
+    outflank_load_parser.add_argument(
+        "--no-versioning",
+        action="store_true",
+        help="Disable versioning (use flat output directory structure)",
+    )
+    outflank_load_parser.add_argument(
+        "--no-analyzers",
+        action="store_true",
+        help="Skip running analyzers (only convert to normalized format)",
+    )
+    outflank_load_parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="YAML config path (for output_rule and outflank.*)",
+    )
+    outflank_load_parser.add_argument(
+        "--output-rule",
+        choices=["all", "errors_only", "none"],
+        default=None,
+        help="Override output_rule from config (see run --output-rule)",
+    )
+    outflank_load_parser.add_argument(
+        "--arguments-rule",
+        choices=["all", "drop", "hash", "features_only"],
+        default=None,
+        help="Override arguments_rule from config (see run --arguments-rule)",
+    )
+
     # -- merge subcommand ---------------------------------------------------------
     merge_parser = subparsers.add_parser(
         "merge",
@@ -2111,6 +2324,18 @@ def _cli() -> int:
                 output_rule_cli=args.output_rule,
                 arguments_rule_cli=args.arguments_rule,
             )
+        elif source == "outflank":
+            return run_outflank_load(
+                log_path=getattr(args, "log_path", None),
+                operation_id=args.operation_id,
+                operation_name=getattr(args, "operation_name", None),
+                out_dir=args.out_dir,
+                no_versioning=args.no_versioning,
+                run_analyzers=False,
+                config=config,
+                output_rule_cli=args.output_rule,
+                arguments_rule_cli=args.arguments_rule,
+            )
     elif args.command == "analyze":
         if args.analyze_all:
             return run_analyze_all(
@@ -2131,6 +2356,19 @@ def _cli() -> int:
             out_dir=args.out_dir,
             analysis_timestamp=datetime.now(timezone.utc),
             config=gw_load_cfg,
+            output_rule_cli=args.output_rule,
+            arguments_rule_cli=args.arguments_rule,
+        )
+    elif args.command == "outflank-load":
+        outflank_cfg = load_config(args.config)
+        return run_outflank_load(
+            log_path=args.log_path,
+            operation_id=args.operation_id,
+            operation_name=args.operation_name,
+            out_dir=args.out_dir,
+            no_versioning=args.no_versioning,
+            run_analyzers=not args.no_analyzers,
+            config=outflank_cfg,
             output_rule_cli=args.output_rule,
             arguments_rule_cli=args.arguments_rule,
         )

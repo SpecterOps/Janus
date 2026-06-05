@@ -245,6 +245,9 @@ func cmdStatus() int {
 				if ep == "" {
 					ep, _ = bundle["cobaltstrike_rest_endpoint"].(string)
 				}
+				if ep == "" {
+					ep, _ = bundle["outflank_log_path"].(string)
+				}
 				epSuffix := ""
 				if ep != "" {
 					epSuffix = " @ " + ep
@@ -314,6 +317,9 @@ func cmdConfig() int {
 	fmt.Printf("Cobalt Strike operation ID: %s\n", intOrNotSet(cfg.CobaltStrike.OperationID))
 	fmt.Printf("Cobalt Strike verify TLS:   %v\n", resolveBool(cfg.CobaltStrike.VerifyTLS, true))
 	fmt.Println("Cobalt Strike ingest source: janus-cli pull/run --source cobaltstrike")
+	fmt.Printf("Outflank log path:          %s\n", orDefault(cfg.Outflank.LogPath, "(not set)"))
+	fmt.Printf("Outflank operation ID:      %s\n", intOrNotSet(cfg.Outflank.OperationID))
+	fmt.Println("Outflank ingest source:     janus-cli pull/run --source outflank")
 	return 0
 }
 

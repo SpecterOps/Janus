@@ -63,6 +63,7 @@ This separation matters operationally:
 | `pull` | Resolve source, config, and target ID; invoke the matching pull workflow | Fetch telemetry and write the initial run directory |
 | `pull --source cobaltstrike` | Resolve Cobalt Strike REST endpoint and auth from flags/config; invoke the Cobalt Strike REST ingest path in the container | Log in to the teamserver REST API, list/fetch tasks, normalize into `out/complete` |
 | `run --source cobaltstrike` | Reuse the Cobalt Strike REST ingest path, then run analyzers and HTML generation | End-to-end Cobalt Strike workflow with the same pull ergonomics as other sources |
+| `pull --source outflank` | Resolve a local Outflank implant log path from flags/config; invoke the Outflank loader in the container | Normalize copied per-beacon log files into `out/complete` |
 | `analyze` | Resolve the latest run or user-specified events file | Run one analyzer or the full set against normalized events |
 | `report` | Resolve the latest analysis directory | Generate HTML from analyzer output |
 | `run` | Chain source pull, analyze, and report | Execute the full pipeline |
@@ -76,6 +77,7 @@ This separation matters operationally:
 | Mythic | `mythic`, `mythic-partial` | Commands, responses, callback metadata, lifecycle state | Best fidelity for failure, retry, duration, and callback-health analysis |
 | Ghostwriter | `ghostwriter` | Oplog chronology, command text, output, project/reporting context | Strong for workflow and timing analysis; weaker for failure-centric analysis |
 | Cobalt Strike REST | `cobaltstrike-rest` | Teamserver REST API tasks (`/api/v1/tasks`, task detail, auth) — see [Cobalt Strike REST API](https://hstechdocs.helpsystems.com/manuals/cobaltstrike/current/userguide/content/api/index.html) | Supported Cobalt Strike path: task + output in one API, suitable for automation without SSH file surgery |
+| Outflank implant logs | `outflank` | Local per-beacon line-oriented JSON logs with task request/response records | Good for command chronology and output review; result status is inferred from response text |
 
 **Cobalt Strike automation note:** The teamserver REST API is the practical way to pull structured tasks and beacon output for Janus. Alternatives such as SSH access to the teamserver host and copying fragmented on-disk artifacts are operationally heavier and do not match Janus’s normalized task/result model as directly.
 
@@ -127,7 +129,7 @@ These are emitted by current first-party parsers and should be treated as the pr
 | Field | Typical status | Meaning |
 | --- | --- | --- |
 | `event_type` | always present | Always `task` |
-| `source` | always present | Parser/source identifier such as `mythic`, `ghostwriter`, `mythic-partial`, or `cobaltstrike-rest` |
+| `source` | always present | Parser/source identifier such as `mythic`, `ghostwriter`, `mythic-partial`, `cobaltstrike-rest`, or `outflank` |
 | `operation_id` | always present today | Operation or project identifier; may be remapped during merge |
 | `callback_id` | always present today | Callback/session identifier; may be synthetic or `0` when unavailable |
 | `callback_display_id` | usually present | Human-facing callback label; may be copied from `callback_id` or defaulted |
@@ -161,6 +163,7 @@ Important caveats:
 - Ghostwriter does not populate `display_id`, `processing_timestamp`, `callback_sleep_info`, `issued_command_name`, `parent_task_id`, or `orphaned_subtask`
 - Partial Mythic synthesizes some timing fields to preserve analyzer compatibility, so those values are less trustworthy than full Mythic pull data
 - Cobalt Strike REST hashes string `taskId` to an int `task_id`, sets `callback_id` from `bid`, and may populate `callback_sleep_info` from beacon metadata when the REST API exposes sleep settings
+- Outflank hashes string `task.uid` and `implant.uid` values to Janus integer IDs, stores the raw task UID in `c2_task_id`, and may populate `callback_sleep_info` from the implant `delay` field
 
 ### Result Event
 
@@ -202,6 +205,7 @@ Important caveats:
 
 - Ghostwriter currently emits `status: unknown` for all results because the source does not expose a reliable success/error signal
 - Cobalt Strike REST maps API `taskStatus` and `error`/`result` payloads to `success` / `error` / `unknown`; operator and acknowledgement text are merged into `output_text`
+- Outflank local logs infer `error` only from clear response text markers such as `Err:`; non-empty non-error responses are `success`, and empty responses are `unknown`
 - `output_text` is required by validation, but may be intentionally empty after `output_rule=errors_only`
 
 ### Retention controls and NDJSON content
@@ -267,6 +271,12 @@ Live ingest uses the teamserver REST server (authenticate with `POST /api/auth/l
 
 When using `janus-cli`, ensure `rest_endpoint` is reachable **from inside the Janus container** (routable IP/DNS, host networking, or `host.docker.internal`). A host-only `https://127.0.0.1:50443` works on the host but often fails in the default bridge network; see [Docker wrapper networking](#docker-wrapper-networking) and the [FAQ](FAQ.md#cobalt-strike-rest-and-janus-cli--docker).
 
+### Outflank Implant Logs
+
+Offline ingest reads local per-beacon Outflank implant logs, commonly named by implant UID under `/opt/outflank/shared/logs/api/implant_logs/json/`. Each line is a UTC timestamp followed by a JSON object. Janus normalizes `task_request` rows into tasks and `task_response` rows into results, hashing string `task.uid` / `implant.uid` values into integer IDs for analyzer joins.
+
+Use `./janus-cli pull --source outflank --log-path out/input/TSO8IEAB.json` or `./janus-cli run --source outflank --log-path out/input/`. The Go wrapper only mounts `./out` into Docker, so the log path must be under `out/` unless you invoke the Python entrypoint directly inside a differently mounted container.
+
 ## Analyzer Registries
 
 Two registry layers shape analysis behavior:
@@ -297,6 +307,7 @@ Today it has incompatible meanings:
 
 - Ghostwriter uses it as a source-side task or entry identifier
 - Cobalt Strike REST uses it for the opaque string `taskId`
+- Outflank uses it for the raw string `task.uid`
 
 That makes it a poor shared-model field. The cleaner long-term direction is one of:
 
@@ -317,7 +328,7 @@ By contrast, the other optional enrichments are reasonable to keep in the shared
 
 Janus does **not** use LLMs for analysis, summarization, or report generation. All analysis runs locally from the telemetry you ingest.
 
-Janus does **not** send normalized operation data to external AI or SaaS analysis services. Network access is limited to the source systems you explicitly configure for data collection (Mythic, Ghostwriter, or Cobalt Strike REST endpoints).
+Janus does **not** send normalized operation data to external AI or SaaS analysis services. Network access is limited to the source systems you explicitly configure for data collection (Mythic, Ghostwriter, or Cobalt Strike REST endpoints). Outflank implant-log ingestion is offline/local file ingestion.
 
 ### What Janus Stores Today
 

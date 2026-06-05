@@ -3,7 +3,7 @@ dist/
 build/
 *.egg-info/
 
-# Compiled binaries (distributed via Releases, not committed to repo)
+# Compiled binaries (distributed via Releases)
 janus-cli
 janus-cli.exe
 janus-cli-linux-amd64
@@ -15,7 +15,7 @@ janus-cli-windows-amd64.exe
 __pycache__/
 *.pyc
 
-# Testing / coverage (local runs; never commit)
+# Testing / coverage (local runs)
 .pytest_cache/
 .tox/
 .hypothesis/
@@ -27,10 +27,12 @@ coverage.xml
 .pytest_tmp/
 uv.lock
 Tests/
+!tests/
+!tests/*.py
 
 Config/janus.yml
 # Local virtualenv (uv/pip)
 .venv/
 
-# Local Claude Code permissions
+# Local Claude Code Settings
 .claude/settings.local.json
