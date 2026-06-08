@@ -99,3 +99,7 @@ For the full normalized event model and architecture notes, see docs below.
 
 - [Architecture](docs/architecture.md)
 - [FAQ](docs/FAQ.md)
+
+## Credits / Contributions
+
+- Thanks to [@IC3-512](https://github.com/IC3-512) for providing OC2 logs that helped make the OC2 ingestion work possible.
