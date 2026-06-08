@@ -71,10 +71,12 @@ cp Config/janus.example.yml Config/janus.yml # set source, redaction settings, e
 
 ## Skills
 
-Use repo-local skills by running `claude` or `codex` from the Janus folder, then invoking the skill with `/` or `$`.
+Use repo-local skills/commands by running `claude` or `codex` from the Janus folder, then invoking the command or skill with `/` or `$`.
 
 - [janus-analyzer-skill](https://github.com/SpecterOps/Janus/blob/main/.codex/skills/janus-analyzer-skill/SKILL.md): Use for Janus measurement, analyzer-selection, and source-aware implementation requests across Janus-supported C2 telemetry.
+- [janus-ingestor-creation](https://github.com/SpecterOps/Janus/blob/main/.codex/skills/janus-ingestor-creation/SKILL.md): Use for adding or adjusting Janus live API and local-file source ingestors while preserving the normalized event model.
 - [janus-insight-interpreter](https://github.com/SpecterOps/Janus/blob/main/.codex/skills/janus-report-interpreter/SKILL.md): Use for evidence-based interpretation of Janus artifacts across Janus-supported C2 telemetry.
+- Claude command equivalents live under [.claude/commands](https://github.com/SpecterOps/Janus/tree/main/.claude/commands), including `janus-ingestor`.
 
 
 ## Privacy

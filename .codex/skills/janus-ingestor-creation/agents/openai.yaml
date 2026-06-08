@@ -1,0 +1,8 @@
+interface:
+  display_name: "Janus Ingestor Creation"
+  short_description: "Build Janus live and local ingestors"
+  default_prompt: "Use $janus-ingestor-creation to add or adjust a Janus source ingestor while preserving the canonical event model and CLI workflow."
+
+policy:
+  allow_implicit_invocation: true
+
