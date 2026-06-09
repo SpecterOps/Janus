@@ -10,6 +10,7 @@ import platform
 import tomllib
 import uuid
 from datetime import datetime, timezone
+from importlib import metadata
 from pathlib import Path
 
 
@@ -41,7 +42,12 @@ def validate_events(events: list[dict]) -> None:
 
 
 def get_janus_version() -> str:
-    """Read version from pyproject.toml using tomllib (Python 3.11+)."""
+    """Return the Janus package version from installed metadata or source."""
+    try:
+        return metadata.version("janus")
+    except metadata.PackageNotFoundError:
+        pass
+
     try:
         pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
         with open(pyproject_path, "rb") as f:

@@ -3,6 +3,22 @@ version: 1
 defaults:
   behavior_classes: []
 
+friction_score:
+  weights:
+    failure_rate: 30
+    retry_density: 20
+    retry_to_success_rate: 15
+    p95_duration: 15
+    median_duration: 10
+    callback_health_penalty: 5
+    argument_anomaly_rate: 5
+  sample_confidence_thresholds:
+    high: 10
+    medium: 5
+  duration_caps:
+    median_seconds: 300
+    p95_seconds: 900
+
 source_defaults:
   ghostwriter:
     behavior_classes:

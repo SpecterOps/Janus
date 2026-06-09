@@ -1,0 +1,13 @@
+version: 1
+
+recommendation_rules:
+  - name: operator-path-probing
+    description: Navigation and listing commands are commonly repeated while operators test paths.
+    match:
+      command_names:
+        - cd
+        - ls
+    suppress_actions:
+      - automate
+    fallback_action: investigate
+    reason: Repeated navigation/listing often reflects path probing, not a tooling automation candidate.

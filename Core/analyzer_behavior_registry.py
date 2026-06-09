@@ -56,12 +56,14 @@ class AnalyzerBehaviorRegistry:
         *,
         version: int,
         defaults: dict[str, Any],
+        friction_score: dict[str, Any],
         source_defaults: dict[str, dict[str, Any]],
         command_rules: list[BehaviorRule],
         source_path: Path,
     ) -> None:
         self.version = version
         self.defaults = defaults
+        self.friction_score = friction_score
         self.source_defaults = source_defaults
         self.command_rules = command_rules
         self.source_path = source_path
@@ -80,6 +82,7 @@ class AnalyzerBehaviorRegistry:
             raise ValueError(f"analyzer registry version must be {REGISTRY_VERSION}, got {version}")
 
         defaults = _normalize_behavior_block(raw.get("defaults", {}), location="defaults")
+        friction_score = _normalize_friction_score_block(raw.get("friction_score", {}))
 
         raw_source_defaults = raw.get("source_defaults", {})
         if not isinstance(raw_source_defaults, dict):
@@ -119,6 +122,7 @@ class AnalyzerBehaviorRegistry:
         return cls(
             version=version,
             defaults=defaults,
+            friction_score=friction_score,
             source_defaults=source_defaults,
             command_rules=command_rules,
             source_path=source_path or default_registry_path(),
@@ -188,6 +192,70 @@ class AnalyzerBehaviorRegistry:
             "version": self.version,
             "path": str(self.source_path),
         }
+
+
+def _normalize_friction_score_block(block: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(block, dict):
+        raise ValueError("friction_score must be a mapping")
+
+    default_weights = {
+        "failure_rate": 30.0,
+        "retry_density": 20.0,
+        "retry_to_success_rate": 15.0,
+        "p95_duration": 15.0,
+        "median_duration": 10.0,
+        "callback_health_penalty": 5.0,
+        "argument_anomaly_rate": 5.0,
+    }
+    weights = dict(default_weights)
+    raw_weights = block.get("weights", {})
+    if raw_weights is not None:
+        if not isinstance(raw_weights, dict):
+            raise ValueError("friction_score.weights must be a mapping")
+        for key, value in raw_weights.items():
+            if key not in default_weights:
+                raise ValueError(f"friction_score.weights contains unsupported key '{key}'")
+            if not isinstance(value, (int, float)) or value < 0:
+                raise ValueError(f"friction_score.weights.{key} must be a non-negative number")
+            weights[key] = float(value)
+
+    sample_thresholds = {
+        "high": 10,
+        "medium": 5,
+    }
+    raw_thresholds = block.get("sample_confidence_thresholds", {})
+    if raw_thresholds is not None:
+        if not isinstance(raw_thresholds, dict):
+            raise ValueError("friction_score.sample_confidence_thresholds must be a mapping")
+        for key in ("high", "medium"):
+            if key in raw_thresholds:
+                value = raw_thresholds[key]
+                if not isinstance(value, int) or value < 1:
+                    raise ValueError(f"friction_score.sample_confidence_thresholds.{key} must be a positive integer")
+                sample_thresholds[key] = value
+    if sample_thresholds["high"] < sample_thresholds["medium"]:
+        raise ValueError("friction_score.sample_confidence_thresholds.high must be >= medium")
+
+    duration_caps = {
+        "median_seconds": 300.0,
+        "p95_seconds": 900.0,
+    }
+    raw_caps = block.get("duration_caps", {})
+    if raw_caps is not None:
+        if not isinstance(raw_caps, dict):
+            raise ValueError("friction_score.duration_caps must be a mapping")
+        for key in ("median_seconds", "p95_seconds"):
+            if key in raw_caps:
+                value = raw_caps[key]
+                if not isinstance(value, (int, float)) or value <= 0:
+                    raise ValueError(f"friction_score.duration_caps.{key} must be a positive number")
+                duration_caps[key] = float(value)
+
+    return {
+        "weights": weights,
+        "sample_confidence_thresholds": sample_thresholds,
+        "duration_caps": duration_caps,
+    }
 
 
 def _normalize_behavior_block(block: dict[str, Any], *, location: str) -> dict[str, Any]:
@@ -269,4 +337,5 @@ def build_analyzer_context(path: Path | None = None) -> dict[str, Any]:
     return {
         "behavior_registry": registry,
         "behavior_registry_metadata": registry.metadata(),
+        "friction_score": registry.friction_score,
     }

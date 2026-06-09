@@ -371,6 +371,7 @@ _ANALYZER_GROUPS: list[tuple[str, list[str]]] = [
             "command-failure-summary",
             "command-retry-success",
             "command-duration",
+            "friction-score",
             "outlier-context",
             "av-tracker",
         ],
@@ -445,6 +446,13 @@ def _render_analyzer_panel(
             )
         return _render_missing_section(
             "Command Duration", analysis_files[analyzer_key]
+        )
+
+    if analyzer_key == "friction-score":
+        if analyzer_key in analysis_data:
+            return _render_friction_score(analysis_data[analyzer_key])
+        return _render_missing_section(
+            "Top Friction Candidates", analysis_files[analyzer_key]
         )
 
     if analyzer_key == "outlier-context":
@@ -705,6 +713,17 @@ def _render_report_header(
                 f"({worst['error_count']} errors in {worst['execution_count']} executions"
                 + (f" across {cb_count} callbacks)" if cb_count else ")")
             )
+
+    friction_data = analysis_data.get("friction-score", {})
+    friction_commands = friction_data.get("commands", [])
+    if friction_commands:
+        top = friction_commands[0]
+        findings.append(
+            "Top friction candidate: "
+            f"<code>{html.escape(str(top.get('command_name', 'unknown')))}</code> "
+            f"score {float(top.get('score', 0)):.1f}, "
+            f"action {html.escape(str(top.get('recommended_action', 'investigate')))}"
+        )
 
     cb_data = analysis_data.get("callback-health", {})
     cb_summary = cb_data.get("summary", {})
@@ -1463,6 +1482,100 @@ def _format_structured_diff(structured_changes: list[dict]) -> str:
         # Legacy flat format
         items = "".join(_format_diff_item(c) for c in structured_changes)
         return f'<ul class="diff-list">{items}</ul>'
+
+
+def _render_friction_score(data: dict) -> str:
+    """Render top friction candidates."""
+    commands = data.get("commands", [])
+    summary = data.get("summary", {})
+    if not commands:
+        return _collapsible_section("Top Friction Candidates", "<p>No friction candidates available.</p>")
+
+    rows = []
+    for entry in commands[:10]:
+        drivers = entry.get("drivers", [])
+        if drivers:
+            driver_items = "".join(
+                f"<li>{html.escape(str(driver.get('label', driver.get('component', ''))))}</li>"
+                for driver in drivers
+            )
+            drivers_html = f"<ul>{driver_items}</ul>"
+        else:
+            drivers_html = "<em>No dominant driver</em>"
+
+        confidence = str(entry.get("confidence", "low"))
+        confidence_class = {
+            "high": "status-success",
+            "medium": "medium-failure",
+            "low": "status-unknown",
+        }.get(confidence, "status-unknown")
+        confidence_details = []
+        confidence_details.extend(str(r) for r in entry.get("confidence_reasons", []))
+        confidence_details.extend(str(l) for l in entry.get("limitations", []))
+        if confidence_details:
+            detail_items = "".join(f"<li>{html.escape(item)}</li>" for item in confidence_details)
+            confidence_html = (
+                f'<span class="{confidence_class}">{html.escape(confidence)}</span>'
+                f"<details><summary>Details</summary><ul>{detail_items}</ul></details>"
+            )
+        else:
+            confidence_html = f'<span class="{confidence_class}">{html.escape(confidence)}</span>'
+
+        tool_names = ", ".join(entry.get("tool_names", [])) or "unknown"
+        command_cell = (
+            f"<code>{html.escape(str(entry.get('command_name', 'unknown')))}</code>"
+            f'<br><span class="muted">{html.escape(tool_names)}</span>'
+        )
+        action = html.escape(str(entry.get("recommended_action", "investigate")))
+        action_override = entry.get("action_override")
+        action_html = f"<code>{action}</code>"
+        if isinstance(action_override, dict):
+            original = html.escape(str(action_override.get("original_action", "")))
+            reason = html.escape(str(action_override.get("reason", "")))
+            action_html += (
+                f"<details><summary>Registry override</summary>"
+                f"<p>Suppressed <code>{original}</code>. {reason}</p></details>"
+            )
+        score = float(entry.get("score", 0.0))
+        row_class = "row-high-failure" if score >= 70 else ("row-medium-failure" if score >= 40 else "")
+        rows.append(f"""
+        <tr class="{row_class}">
+            <td>{command_cell}</td>
+            <td data-sort="{score:.2f}"><strong>{score:.1f}</strong></td>
+            <td data-sort="{int(entry.get('total_executions', 0))}">{int(entry.get('total_executions', 0))}</td>
+            <td>{drivers_html}</td>
+            <td>{confidence_html}</td>
+            <td>{action_html}</td>
+        </tr>
+        """)
+
+    coverage = summary.get("data_coverage", {})
+    summary_html = f"""
+    <div class="summary-stats">
+        <p><strong>Commands scored:</strong> {summary.get('commands_scored', len(commands))}</p>
+        <p><strong>Top score:</strong> {float(summary.get('top_score', 0.0)):.1f}</p>
+        <p><strong>Coverage:</strong> duration on {coverage.get('commands_with_duration', 0)} command(s),
+        callback data on {coverage.get('commands_with_callback_data', 0)}, argument features on {coverage.get('commands_with_argument_features', 0)}</p>
+    </div>
+    """
+    table = f"""
+    <div class="table-wrap">
+    <table class="sortable">
+        <thead>
+            <tr>
+                <th>Command / Tool</th>
+                <th>Score</th>
+                <th>Executions</th>
+                <th>Drivers</th>
+                <th>Confidence</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>{''.join(rows)}</tbody>
+    </table>
+    </div>
+    """
+    return _collapsible_section("Top Friction Candidates", summary_html + table)
 
 
 def _render_command_retry_success(data: dict, mythic_base_url: str = "") -> str:

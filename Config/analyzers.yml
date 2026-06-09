@@ -6,6 +6,7 @@ analyzers:
   command-failure-summary: command_failure_summary.json
   command-retry-success: command_retry_success.json
   command-duration: command_duration.json
+  friction-score: friction-score.json
   outlier-context: outlier_context_analysis.json
   callback-health: callback_health.json
   av-tracker: av_tracker.json
@@ -19,6 +20,7 @@ partial_load:
   - command-failure-summary
   - command-retry-success
   - command-duration
+  - friction-score
   - outlier-context
   - av-tracker
   - parameter-entropy
@@ -30,6 +32,7 @@ multi_analyze:
   - command-failure-summary
   - command-retry-success
   - command-duration
+  - friction-score
   - outlier-context
   - callback-health
   - av-tracker

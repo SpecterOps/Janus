@@ -37,6 +37,9 @@ from Analyzers.CommandAnalysis.command_retry_success import (
 from Analyzers.CommandAnalysis.command_duration import (
     analyze as command_duration,
 )
+from Analyzers.CommandAnalysis.friction_score import (
+    analyze as friction_score,
+)
 from Analyzers.CommandAnalysis.outlier_context import (
     analyze as outlier_context,
 )
@@ -69,6 +72,7 @@ from Core.html_output import generate_html
 from Core.io import (
     EventValidationError,
     create_latest_symlink,
+    get_janus_version,
     get_versioned_output_dir,
     validate_events,
     write_bundle,
@@ -163,6 +167,7 @@ ANALYZER_FUNCTIONS = {
     "command-failure-summary": command_failure_summary,
     "command-retry-success": command_retry_success,
     "command-duration": command_duration,
+    "friction-score": friction_score,
     "outlier-context": outlier_context,
     "callback-health": callback_health,
     "av-tracker": av_tracker,
@@ -174,6 +179,7 @@ ANALYZER_FUNCTIONS = {
 
 REGISTRY_AWARE_ANALYZERS = {
     "command-duration",
+    "friction-score",
     "parameter-entropy",
     "outlier-context",
     "argument-position-profile",
@@ -853,6 +859,22 @@ def run_analyze(
             fastest = min(durations.items(), key=lambda x: x[1]["mean_seconds"])
             print(f"Slowest command: {slowest[0]} (avg: {slowest[1]['mean_seconds']}s)")
             print(f"Fastest command: {fastest[0]} (avg: {fastest[1]['mean_seconds']}s)")
+    elif analyzer == "friction-score":
+        result = friction_score(task_events, result_events, analyzer_context)
+        result = _merge_common_metadata(result, analyzer_metadata)
+        out_path = out_dir / "friction-score.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        print(f"Wrote: {out_path}")
+        commands = result.get("commands", [])
+        print(f"Commands scored: {len(commands)}")
+        if commands:
+            top = commands[0]
+            print(
+                f"Top friction candidate: {top['command_name']} "
+                f"(score: {top['score']}, action: {top['recommended_action']})"
+            )
     elif analyzer == "outlier-context":
         result = outlier_context(task_events, result_events, analyzer_context)
         result = _merge_common_metadata(result, analyzer_metadata)
@@ -1722,6 +1744,8 @@ def run_html(
         try:
             with bundle_path.open(encoding="utf-8") as f:
                 version_metadata = json.load(f)
+            if version_metadata.get("janus_version") in (None, "", "unknown"):
+                version_metadata["janus_version"] = get_janus_version()
 
             # Find previous versions if versioning is enabled
             if include_version_links and "analysis_version" in version_metadata:
@@ -1734,6 +1758,8 @@ def run_html(
                     previous_versions = find_previous_versions(base_dir, op_slug, current_version)
         except Exception as e:
             print(f"warning: could not load bundle metadata: {e}", file=sys.stderr)
+    if version_metadata is None:
+        version_metadata = {"janus_version": get_janus_version()}
 
     try:
         generate_html(
