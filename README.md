@@ -63,9 +63,12 @@ cp Config/janus.example.yml Config/janus.yml # set source, redaction settings, e
 | `callback-health` | Which implant sessions show failure patterns or crashes? |
 | `av-tracker` | Which commands or callbacks coincided with AV/EDR detections in `ps` output? |
 | `dwell-time` | Where are operators losing time between tasks? |
+| `friction-score` | Which commands create the most operational friction across failures, retries, duration, callback health, and argument anomalies? |
 | `parameter-entropy` | Which arguments look structurally anomalous? |
 | `argument-position-profile` | What shows up at a given argument slot? |
 | `tool-dump` | Which registry-defined command/tool subsets should be exported for downstream datasets or pattern mining? |
+
+`friction-score` combines findings from the other command analyzers into ranked operational friction candidates. Tune scoring weights and confidence thresholds in `Config/analyzer_registry.yml`, and tune recommendation actions in `Config/friction_score_registry.yml`.
 
 `parameter-entropy` works best when you tune `Config/analyzer_registry.yml` to your own workflows. The current `upload` tuning reflects our observed data and should be treated as a starting point, not a universal baseline.
 
@@ -90,6 +93,8 @@ Retention policies (`output_rule` and `arguments_rule`) control what normalized 
 - `report.html` - visual HTML report
 - `bundle.json` - versioned JSON metadata for automation and downstream tooling
 - `events.ndjson` - normalized event stream for debugging, replay, and testing
+
+Analyzer outputs include `friction-score.json` when the friction score analyzer is enabled. The HTML report surfaces the top friction candidates and their recommendation metadata.
 
 For the full normalized event model and architecture notes, see docs below.
 

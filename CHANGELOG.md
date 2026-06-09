@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-06-09
+
+### Added
+
+- **Friction Score Analyzer**: Added `friction-score`, a command ranking analyzer that combines failure rate, retry density, retry-to-success behavior, duration, callback health, and argument anomaly signals to surface the highest-friction commands in an operation.
+- **Friction score recommendation registry**: Added `Config/friction_score_registry.yml` and `Core/friction_score_registry.py` so action recommendations can be managed by rule, including suppression and fallback behavior for commands where friction does not necessarily imply an automation candidate.
+- **Friction score configuration**: Added `friction_score` weights, sample confidence thresholds, and duration caps to the analyzer behavior registry so scoring can be tuned without code changes.
+
+### Changed
+
+- **Analyzer behavior registry**: Updated registry loading and metadata export to include friction score configuration.
+- **HTML report**: Added friction score output rendering so reports display top friction candidates, component metrics, confidence, and recommendation metadata.
+- **Core I/O and output formats**: Updated bundle/output handling and existing analyzer integration points to carry friction score metadata and emit `friction-score.json` alongside the other analyzer artifacts.
+
 ## [1.1.0] - 2026-06-05
 
 ### Added
