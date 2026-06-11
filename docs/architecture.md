@@ -97,8 +97,24 @@ The real cross-component contract is the on-disk bundle:
 - `analysis_version`
 - `analysis_timestamp`
 - `janus_version`
+- `data_quality`
 
 That means the persisted contract is slightly stricter than the in-memory dataclasses, but narrower than the old documentation implied.
+
+### Data Quality Metadata
+
+Every new `bundle.json` includes a `data_quality` array summarizing parser/source fidelity for the run. Each entry records the source name, parsed event count, skipped entries, invalid timestamps, fallback/generated task IDs, parser-specific malformed counts when available, status distribution, unknown-status percentage, retention modes, and factual interpretation warnings.
+
+The HTML report renders the same entries in a **Data Quality** section. Treat these warnings as confidence guidance, not as analyzer invalidation. For example, a Ghostwriter run with all results marked `unknown` can still support chronology and argument-shape review, but failure-rate and retry-success findings are low-confidence because the source did not provide reliable success/error state.
+
+Current warning rules:
+
+- `unknown` result statuses at 80% or higher reduce confidence in failure-rate and retry-success analysis
+- invalid timestamps may affect timeline and dwell-time analysis
+- fallback/generated task IDs may make task correlation incomplete
+- `arguments_rule: drop` or `features_only` limits argument-level analysis
+- `output_rule: none` limits output and error-signature analysis
+- `output_rule: errors_only` means success-output analysis is unavailable or limited
 
 ## Event Model
 

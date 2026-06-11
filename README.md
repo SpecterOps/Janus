@@ -90,8 +90,8 @@ Retention policies (`output_rule` and `arguments_rule`) control what normalized 
 
 ## Outputs
 
-- `report.html` - visual HTML report
-- `bundle.json` - versioned JSON metadata for automation and downstream tooling
+- `report.html` - visual HTML report, including a Data Quality section with source/parser confidence warnings
+- `bundle.json` - versioned JSON metadata for automation and downstream tooling, including structured `data_quality`
 - `events.ndjson` - normalized event stream for debugging, replay, and testing
 
 Analyzer outputs include `friction-score.json` when the friction score analyzer is enabled. The HTML report surfaces the top friction candidates and their recommendation metadata.

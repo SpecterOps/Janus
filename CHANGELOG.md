@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Parser Quality Dashboard**: Added a report **Data Quality** section and structured `bundle.json` `data_quality` entries so parser/source fidelity is visible per source, including skipped records, invalid timestamps, fallback task IDs, status distributions, retention modes, parser malformed-count metadata, and confidence warnings for limited analysis categories.
 - **Friction Score Analyzer**: Added `friction-score`, a command ranking analyzer that combines failure rate, retry density, retry-to-success behavior, duration, callback health, and argument anomaly signals to surface the highest-friction commands in an operation.
 - **Friction score recommendation registry**: Added `Config/friction_score_registry.yml` and `Core/friction_score_registry.py` so action recommendations can be managed by rule, including suppression and fallback behavior for commands where friction does not necessarily imply an automation candidate.
 - **Friction score configuration**: Added `friction_score` weights, sample confidence thresholds, and duration caps to the analyzer behavior registry so scoring can be tuned without code changes.

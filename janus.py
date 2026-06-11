@@ -68,6 +68,7 @@ from Core.analyzer_registry import (
     PARTIAL_LOAD_ANALYZERS,
 )
 from Core.analyzer_behavior_registry import build_analyzer_context
+from Core.data_quality import aggregate_data_quality, build_data_quality
 from Core.html_output import generate_html
 from Core.io import (
     EventValidationError,
@@ -1496,6 +1497,7 @@ def run_merge(
     all_task_events = []
     all_result_events = []
     operation_metadata = []
+    all_data_quality_entries = []
     operation_ids_seen = set()
     merged_arguments_rules = set()
     merged_output_rules = set()
@@ -1519,6 +1521,12 @@ def run_merge(
             result_events,
             bundle_metadata=bundle_metadata,
         )
+        input_data_quality = build_data_quality(
+            bundle_metadata,
+            task_events,
+            result_events,
+        )
+        all_data_quality_entries.extend(input_data_quality)
         merged_arguments_rules.update(input_retention_info["observed_arguments_rules"])
         merged_output_rules.update(input_retention_info["observed_output_rules"])
 
@@ -1564,6 +1572,7 @@ def run_merge(
             "status_counts": status_counts,
             "arguments_rule": input_retention_info["arguments_retained"],
             "output_rule": input_retention_info["output_retained"],
+            "data_quality": input_data_quality,
         })
 
         all_task_events.extend(task_events)
@@ -1616,6 +1625,7 @@ def run_merge(
         "arguments_rule": retention_info["arguments_retained"],
         "observed_output_rules": retention_info["observed_output_rules"],
         "observed_arguments_rules": retention_info["observed_arguments_rules"],
+        "data_quality": aggregate_data_quality(all_data_quality_entries),
     }
 
     bundle_path = output_dir / "bundle.json"

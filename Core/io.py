@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from importlib import metadata
 from pathlib import Path
 
+from Core.data_quality import build_data_quality
+
 
 class EventValidationError(Exception):
     """Raised when an event fails schema validation."""
@@ -142,6 +144,9 @@ def write_bundle(
     - analysis_timestamp (ISO 8601 UTC)
     - janus_version
     """
+    if "data_quality" not in metadata:
+        metadata["data_quality"] = build_data_quality(metadata)
+
     if analysis_timestamp is not None:
         version_str = analysis_timestamp.strftime("%Y%m%d_%H%M%S")
         timestamp_iso = analysis_timestamp.isoformat().replace("+00:00", "Z")

@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
 
+from Core.data_quality import build_data_quality
+
 
 def _decode_base64_output(text: str) -> str:
     """Attempt to decode base64-encoded output text.
@@ -176,6 +178,32 @@ def _format_retention_rule_list(rules: object) -> str:
     if not values:
         return ""
     return ", ".join(f"<code>{value}</code>" for value in values)
+
+
+def _load_events_for_quality(events_path: Path) -> tuple[list[dict], list[dict]]:
+    """Best-effort events.ndjson loader for older bundles without data_quality."""
+    task_events: list[dict] = []
+    result_events: list[dict] = []
+    if not events_path.exists():
+        return task_events, result_events
+
+    with events_path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            event_type = event.get("event_type")
+            if event_type == "task":
+                task_events.append(event)
+            elif event_type == "result":
+                result_events.append(event)
+    return task_events, result_events
 
 
 def _retention_metadata_from_analysis(analysis_data: dict) -> dict | None:
@@ -541,7 +569,19 @@ def generate_html(
     for cb_id, cb_info in analysis_data.get("callback-health", {}).get("callbacks", {}).items():
         callback_data[str(cb_id)] = cb_info
 
-    quality = _assess_report_quality(version_metadata or {}, analysis_data)
+    task_events_for_quality: list[dict] | None = None
+    result_events_for_quality: list[dict] | None = None
+    if not (version_metadata or {}).get("data_quality"):
+        events_name = str((version_metadata or {}).get("events_path") or "events.ndjson")
+        events_path = output_path.parent / events_name
+        task_events_for_quality, result_events_for_quality = _load_events_for_quality(events_path)
+
+    data_quality = build_data_quality(
+        version_metadata or {},
+        task_events_for_quality,
+        result_events_for_quality,
+    )
+    quality = _assess_report_quality(version_metadata or {}, analysis_data, data_quality)
 
     report_overview = _render_report_header(
         version_metadata,
@@ -552,6 +592,10 @@ def generate_html(
     )
 
     sections: list[str] = []
+    data_quality_section = _render_data_quality(data_quality)
+    if data_quality_section.strip():
+        sections.append(data_quality_section)
+
     for group_title, analyzer_keys in _ANALYZER_GROUPS:
         inner_parts: list[str] = []
         for key in analyzer_keys:
@@ -1037,6 +1081,106 @@ def _render_summary_analysis_static(data: dict) -> str:
     """
 
 
+def _format_quality_count(value: object) -> str:
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _format_quality_percent(value: object) -> str:
+    try:
+        return f"{float(value):.1f}%"
+    except (TypeError, ValueError):
+        return "unknown"
+
+
+def _format_invalid_record_counts(counts: object) -> str:
+    if not isinstance(counts, dict) or not counts:
+        return "<span class=\"muted\">none</span>"
+    parts = []
+    for key, value in sorted(counts.items()):
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            count = 0
+        if count:
+            parts.append(f"{html.escape(str(key))}: {count:,}")
+    if not parts:
+        return "<span class=\"muted\">none</span>"
+    return "<br>".join(parts)
+
+
+def _render_data_quality(data_quality: list[dict]) -> str:
+    """Render parser/source quality metrics as a report section."""
+    if not data_quality:
+        return ""
+
+    rows: list[str] = []
+    warning_blocks: list[str] = []
+    for entry in data_quality:
+        if not isinstance(entry, dict):
+            continue
+        source = html.escape(str(entry.get("source") or "unknown"))
+        status = entry.get("status_distribution") or {}
+        status_text = (
+            f"success {_format_quality_count(status.get('success'))}<br>"
+            f"error {_format_quality_count(status.get('error'))}<br>"
+            f"unknown {_format_quality_count(status.get('unknown'))}<br>"
+            f"other {_format_quality_count(status.get('other'))}"
+        )
+        rows.append(
+            "<tr>"
+            f"<td><code>{source}</code></td>"
+            f"<td>{_format_quality_count(entry.get('events_parsed'))}</td>"
+            f"<td>{_format_quality_count(entry.get('skipped_entries'))}</td>"
+            f"<td>{_format_quality_count(entry.get('invalid_timestamps'))}</td>"
+            f"<td>{_format_quality_count(entry.get('fallback_task_ids'))}</td>"
+            f"<td>{status_text}</td>"
+            f"<td>{_format_quality_percent(entry.get('unknown_status_percent'))}</td>"
+            f"<td><code>{html.escape(str(entry.get('argument_retention') or 'unknown'))}</code></td>"
+            f"<td><code>{html.escape(str(entry.get('output_retention') or 'unknown'))}</code></td>"
+            f"<td>{_format_invalid_record_counts(entry.get('invalid_record_counts'))}</td>"
+            "</tr>"
+        )
+        warnings = [str(w) for w in entry.get("warnings", []) if str(w).strip()]
+        if warnings:
+            warning_items = "".join(f"<li>{html.escape(w)}</li>" for w in warnings)
+            warning_blocks.append(
+                '<div class="quality-warning data-quality-callout">'
+                f"<h3>Interpretation Warning: <code>{source}</code></h3>"
+                f'<ul class="findings-list">{warning_items}</ul>'
+                "</div>"
+            )
+
+    if not rows:
+        return ""
+
+    content = f"""
+    <div class="table-wrap">
+        <table class="sortable data-quality-table">
+            <thead>
+                <tr>
+                    <th>Source</th>
+                    <th>Events parsed</th>
+                    <th>Skipped entries</th>
+                    <th>Invalid timestamps</th>
+                    <th>Fallback task IDs</th>
+                    <th>Status distribution</th>
+                    <th>Unknown statuses</th>
+                    <th>Argument retention</th>
+                    <th>Output retention</th>
+                    <th>Parser counts</th>
+                </tr>
+            </thead>
+            <tbody>{''.join(rows)}</tbody>
+        </table>
+    </div>
+    {''.join(warning_blocks)}
+    """
+    return _collapsible_section("Data Quality", content, open_by_default=True)
+
+
 def _render_missing_section(section_name: str, path: Path) -> str:
     """Render a message for missing analysis data."""
     return _collapsible_section(
@@ -1058,15 +1202,39 @@ def _render_suppressed_section(section_name: str, reason: str) -> str:
     )
 
 
-def _assess_report_quality(metadata: dict, analysis_data: dict) -> dict:
+def _assess_report_quality(
+    metadata: dict,
+    analysis_data: dict,
+    data_quality: list[dict] | None = None,
+) -> dict:
     """Assess whether the current dataset can support each report section.
 
     The current priority is to avoid presenting failure-centric conclusions when the
     source data lacks reliable success/error state.
     """
     source = metadata.get("source", "")
-    result_count = int(metadata.get("result_count") or 0)
-    status_counts = metadata.get("status_counts") or {}
+    data_quality = data_quality or []
+    if data_quality:
+        status_counts = {"success": 0, "error": 0, "unknown": 0, "other": 0}
+        for entry in data_quality:
+            for key, value in (entry.get("status_distribution") or {}).items():
+                bucket = key if key in status_counts else "other"
+                try:
+                    status_counts[bucket] += int(value)
+                except (TypeError, ValueError):
+                    pass
+        result_count = sum(status_counts.values())
+        quality_warnings = [
+            str(w)
+            for entry in data_quality
+            for w in entry.get("warnings", [])
+            if str(w).strip()
+        ]
+    else:
+        result_count = int(metadata.get("result_count") or 0)
+        status_counts = metadata.get("status_counts") or {}
+        quality_warnings = []
+
     success_count = int(status_counts.get("success") or 0)
     error_count = int(status_counts.get("error") or 0)
     unknown_count = int(status_counts.get("unknown") or 0)
@@ -1076,12 +1244,16 @@ def _assess_report_quality(metadata: dict, analysis_data: dict) -> dict:
     warnings: list[str] = []
     suppressed_sections: dict[str, str] = {}
 
-    if source == "ghostwriter":
+    if source == "ghostwriter" and not quality_warnings:
         warnings.append(
             "Ghostwriter exports currently preserve command chronology well, but often lack reliable success/error and output fields."
         )
 
-    if result_count and unknown_ratio >= 0.9:
+    for warning in quality_warnings:
+        if warning not in warnings:
+            warnings.append(warning)
+
+    if result_count and unknown_ratio >= 0.9 and not quality_warnings:
         warnings.append(
             f"{unknown_count} of {result_count} results are unknown, so failure-driven analyses would be misleading."
         )
@@ -3193,6 +3365,14 @@ def _get_html_template(report_overview_html: str, body_content: str) -> str:
         .privacy-filtered {{
             color: #888;
             font-style: italic;
+        }}
+
+        .muted {{
+            color: #777;
+        }}
+
+        .data-quality-table td {{
+            white-space: normal;
         }}
 
         .operations-list {{

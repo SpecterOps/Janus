@@ -228,6 +228,12 @@ For normal single-operation runs, `bundle.json` is the authoritative privacy rec
 
 If you merge runs with different settings, the merged `bundle.json` records `output_rule: mixed` and/or `arguments_rule: mixed` plus `observed_output_rules` / `observed_arguments_rules` arrays listing the exact policies present. The HTML report also displays a retention policy banner in the Report Overview section when non-default or mixed policies are active.
 
+### What does the Data Quality section mean?
+
+`report.html` includes a **Data Quality** section backed by `bundle.json`'s `data_quality` array. It shows parser/source metrics such as skipped records, invalid timestamps, fallback task IDs, result-status distribution, unknown-status percentage, and retention modes.
+
+Interpretation warnings are confidence notes. They do not mean an analyzer is invalid. For example, Ghostwriter runs often keep useful chronology but may emit `unknown` result status for all rows, so failure-rate and retry-success analysis should be treated as low-confidence. Invalid timestamps can affect timeline/dwell-time analysis, fallback task IDs can weaken task correlation, and restrictive retention modes limit argument or output-dependent sections.
+
 ### Does Janus send data to any external service?
 
 No. Janus does not use LLMs, cloud analytics, or telemetry services. Network access is limited to the source systems you configure for data collection (Mythic, Ghostwriter, or Cobalt Strike REST endpoints). Outflank implant-log ingestion is offline/local file ingestion. See [docs/architecture.md — Privacy](architecture.md#privacy) for the full data handling model.
