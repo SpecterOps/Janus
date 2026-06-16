@@ -14,6 +14,7 @@ import re
 from collections import defaultdict
 
 from Core.av_signature_registry import AVSignatureRegistry
+from Core.event_utils import task_key as _task_key
 
 _PS_JSON_TEXT_KEYS = (
     "name",
@@ -26,11 +27,6 @@ _PS_JSON_TEXT_KEYS = (
     "signer",
     "architecture",
 )
-
-
-def _task_key(event: dict) -> tuple[int, int]:
-    return (event.get("operation_id", 0), event["task_id"])
-
 
 _MIN_STEM_LENGTH = 6  # stems shorter than this are too generic for safe substring matching
 

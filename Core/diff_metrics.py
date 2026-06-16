@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter, defaultdict
-from datetime import datetime
 from typing import Any
 
 from Core.analyzer_command_grouping import analyzer_command_group, retry_sequence_group_key
 from Core.diff_load import RunArtifacts
+from Core.event_utils import optional_task_key as _task_key
+from Core.event_utils import percentile as _percentile
+from Core.event_utils import seconds_between as _time_diff_seconds
 
 MAX_WALL_CLOCK_SECONDS = 14400.0
 RETRY_WINDOW_SECONDS = 300.0
@@ -387,29 +389,6 @@ def _finish_status_rates(entry: dict[str, Any]) -> None:
         entry["sources"] = sorted(entry["sources"])
     if isinstance(entry.get("tool_names"), set):
         entry["tool_names"] = sorted(entry["tool_names"])
-
-
-def _task_key(event: dict[str, Any]) -> tuple[Any, Any]:
-    return (event.get("operation_id", 0), event.get("task_id"))
-
-
-def _time_diff_seconds(ts1: Any, ts2: Any) -> float | None:
-    try:
-        dt1 = datetime.fromisoformat(str(ts1).replace("Z", "+00:00"))
-        dt2 = datetime.fromisoformat(str(ts2).replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return None
-    return (dt2 - dt1).total_seconds()
-
-
-def _percentile(values: list[float], percentile: float) -> float:
-    if not values:
-        return 0.0
-    sorted_values = sorted(values)
-    index = int(percentile * len(sorted_values))
-    if index >= len(sorted_values):
-        index = len(sorted_values) - 1
-    return sorted_values[index]
 
 
 def _safe_int(value: Any) -> int:

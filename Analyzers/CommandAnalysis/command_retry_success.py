@@ -11,14 +11,11 @@ Argument comparison: JSON diff with string fallback
 
 import json
 from collections import defaultdict
-from datetime import datetime
 
 from Core.analyzer_command_grouping import retry_sequence_group_key
+from Core.event_utils import seconds_between as _time_diff_seconds
+from Core.event_utils import task_key as _task_key
 from Core.output_rule import copy_task_retention_fields
-
-
-def _task_key(event: dict) -> tuple[int, int]:
-    return (event.get("operation_id", 0), event["task_id"])
 
 
 def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
@@ -67,7 +64,7 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
             # overnight gap doesn't silently absorb tasks from the next session.
             while j < len(tasks):
                 gap = _time_diff_seconds(tasks[j - 1]["timestamp"], tasks[j]["timestamp"])
-                if gap <= 300:  # 5-minute window between consecutive attempts
+                if gap is not None and gap <= 300:  # 5-minute window between consecutive attempts
                     sequence.append(tasks[j])
                     j += 1
                 else:
@@ -92,13 +89,6 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
         "retry_patterns": retry_patterns,
         "summary": summary,
     }
-
-
-def _time_diff_seconds(ts1: str, ts2: str) -> float:
-    """Calculate time difference in seconds between two ISO 8601 timestamps."""
-    dt1 = datetime.fromisoformat(ts1.replace("Z", "+00:00"))
-    dt2 = datetime.fromisoformat(ts2.replace("Z", "+00:00"))
-    return (dt2 - dt1).total_seconds()
 
 
 def _parse_args(arguments_raw: str) -> dict | str:
@@ -370,7 +360,7 @@ def _analyze_sequence(
         })
 
     # Calculate time span
-    time_span = _time_diff_seconds(timestamps[0], timestamps[-1])
+    time_span = _time_diff_seconds(timestamps[0], timestamps[-1]) or 0.0
 
     # Analyze argument changes between consecutive attempts
     all_legacy_changes = []

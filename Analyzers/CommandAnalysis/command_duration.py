@@ -18,20 +18,17 @@ reference.
 import re
 import statistics
 from collections import defaultdict
-from datetime import datetime
 
 from Core.analyzer_behavior_registry import build_analyzer_context
 from Core.analyzer_command_grouping import analyzer_command_group
+from Core.event_utils import seconds_between as _time_diff_seconds
+from Core.event_utils import task_key as _task_key
 from Core.output_rule import copy_task_retention_fields
 
 # Gaps longer than 4 hours between task submission and result are almost certainly
 # overnight/session-break artefacts, not real execution time. Drop them so they
 # don't inflate mean/p95/outlier statistics.
 MAX_WALL_CLOCK_SECONDS = 14400.0
-
-
-def _task_key(event: dict) -> tuple[int, int]:
-    return (event.get("operation_id", 0), event["task_id"])
 
 
 def analyze(task_events: list[dict], result_events: list[dict], context: dict | None = None) -> dict:
@@ -83,7 +80,7 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
             registry_excluded_by_command[bucket] += 1
 
         wall_clock = _time_diff_seconds(task_info["timestamp"], result_timestamp)
-        if wall_clock < 0:
+        if wall_clock is None or wall_clock < 0:
             continue
         if wall_clock > MAX_WALL_CLOCK_SECONDS:
             # Overnight / session-break gap — not real execution time; skip silently
@@ -95,7 +92,7 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
         agent_duration = None
         if processing_ts:
             agent_duration = _time_diff_seconds(processing_ts, result_timestamp)
-            if agent_duration < 0:
+            if agent_duration is None or agent_duration < 0:
                 agent_duration = None
             else:
                 any_agent_duration = True
@@ -169,13 +166,6 @@ def parse_sleep_info(sleep_info: str) -> float | None:
     if m:
         return float(m.group(1))
     return None
-
-
-def _time_diff_seconds(ts1: str, ts2: str) -> float:
-    """Calculate time difference in seconds between two ISO 8601 timestamps."""
-    dt1 = datetime.fromisoformat(ts1.replace("Z", "+00:00"))
-    dt2 = datetime.fromisoformat(ts2.replace("Z", "+00:00"))
-    return (dt2 - dt1).total_seconds()
 
 
 def _compute_stats(entries: list[dict]) -> dict:

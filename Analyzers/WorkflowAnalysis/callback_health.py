@@ -10,17 +10,11 @@ Requires callback_id on task events (Mythic parser ≥ v0.4).
 
 from collections import defaultdict
 
+from Core.event_utils import callback_key as _callback_key
+from Core.event_utils import task_key as _task_key
 from Core.output_rule import copy_task_retention_fields
 
 CONSECUTIVE_FAILURE_THRESHOLD = 3
-
-
-def _task_key(event: dict) -> tuple[int, int]:
-    return (event.get("operation_id", 0), event["task_id"])
-
-
-def _callback_key(task: dict) -> str:
-    return f"{task.get('operation_id', 0)}:{task.get('callback_id', 0)}"
 
 
 def analyze(task_events: list[dict], result_events: list[dict]) -> dict:

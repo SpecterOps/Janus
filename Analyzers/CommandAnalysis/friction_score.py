@@ -10,43 +10,19 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter, defaultdict
-from datetime import datetime
 from typing import Any
 
 from Core.analyzer_behavior_registry import build_analyzer_context
 from Core.analyzer_command_grouping import analyzer_command_group, retry_sequence_group_key
+from Core.event_utils import callback_key as _callback_key
+from Core.event_utils import percentile as _pct
+from Core.event_utils import seconds_between as _time_diff_seconds
+from Core.event_utils import task_key as _task_key
 from Core.friction_score_registry import FrictionScoreRegistry
 
 MAX_WALL_CLOCK_SECONDS = 14400.0
 RETRY_WINDOW_SECONDS = 300.0
 CONSECUTIVE_FAILURE_THRESHOLD = 3
-
-
-def _task_key(event: dict) -> tuple[int, int]:
-    return (event.get("operation_id", 0), event["task_id"])
-
-
-def _callback_key(task: dict) -> str:
-    return f"{task.get('operation_id', 0)}:{task.get('callback_id', 0)}"
-
-
-def _time_diff_seconds(ts1: str, ts2: str) -> float | None:
-    try:
-        dt1 = datetime.fromisoformat(ts1.replace("Z", "+00:00"))
-        dt2 = datetime.fromisoformat(ts2.replace("Z", "+00:00"))
-    except (AttributeError, ValueError):
-        return None
-    return (dt2 - dt1).total_seconds()
-
-
-def _pct(values: list[float], percentile: float) -> float:
-    if not values:
-        return 0.0
-    sorted_values = sorted(values)
-    index = int(percentile * len(sorted_values))
-    if index >= len(sorted_values):
-        index = len(sorted_values) - 1
-    return sorted_values[index]
 
 
 def _clamp01(value: float) -> float:

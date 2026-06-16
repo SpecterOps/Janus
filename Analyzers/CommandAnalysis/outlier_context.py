@@ -9,15 +9,12 @@ patterns to answer: What typically happens before/after long-running commands?
 from collections import Counter
 
 from Core.analyzer_command_grouping import analyzer_command_group
+from Core.event_utils import seconds_between as _time_diff_seconds
+from Core.event_utils import task_key as _task_key
 
 from Analyzers.CommandAnalysis.command_duration import (
-    _time_diff_seconds,
     analyze as command_duration_analyze,
 )
-
-
-def _task_key(event: dict) -> tuple[int, int]:
-    return (event.get("operation_id", 0), event["task_id"])
 
 
 def analyze(task_events: list[dict], result_events: list[dict], context: dict | None = None) -> dict:
@@ -163,7 +160,7 @@ def _build_duration_lookup(
         task_ts = task_by_id[task_id]
         result_ts = r["timestamp"]
         duration = _time_diff_seconds(task_ts, result_ts)
-        if duration >= 0:
+        if duration is not None and duration >= 0:
             lookup[task_id] = round(duration, 2)
     return lookup
 

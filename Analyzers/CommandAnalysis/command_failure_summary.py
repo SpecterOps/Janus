@@ -10,11 +10,8 @@ No heuristics. No workflows. No chaining.
 from collections import defaultdict
 
 from Core.analyzer_command_grouping import analyzer_command_group
+from Core.event_utils import task_key as _task_key
 from Core.output_rule import copy_result_retention_fields, copy_task_retention_fields
-
-
-def _task_key(event: dict) -> tuple[int, int]:
-    return (event.get("operation_id", 0), event["task_id"])
 
 
 def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
