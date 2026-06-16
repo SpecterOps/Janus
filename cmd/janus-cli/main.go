@@ -25,6 +25,7 @@ Commands:
   run            Pull + analyze + report in one shot for any supported source
   merge          Merge multiple operations into a unified dataset
   multi-analyze  Merge + run the multi-op analyzer set + report
+  diff           Compare a baseline run against a candidate run
   status         Show current output state
   config         Display current configuration
   version        Print the version and exit
@@ -44,6 +45,7 @@ Examples:
   janus-cli report                                    # report on latest analysis
   janus-cli report --json out/complete/operation-bofdev_20260318_140203
   janus-cli merge --pattern "partial/*/" --output out/combined/
+  janus-cli diff --baseline out/complete/op_old --candidate out/complete/op_new
   janus-cli status
   janus-cli config
   janus-cli version
@@ -94,6 +96,8 @@ func main() {
 		rc = cmdMerge(args)
 	case "multi-analyze":
 		rc = cmdMultiAnalyze(args)
+	case "diff":
+		rc = cmdDiff(args)
 	case "status":
 		rc = cmdStatus()
 	case "config":
@@ -538,6 +542,103 @@ func cmdReport(args []string) int {
 	}
 
 	fmt.Printf("Report: %s\n", filepath.Join(target, "report.html"))
+	return 0
+}
+
+func cmdDiff(args []string) int {
+	fs := flag.NewFlagSet("diff", flag.ExitOnError)
+	baseline := fs.String("baseline", "", "Baseline Janus run directory under out/")
+	candidate := fs.String("candidate", "", "Candidate Janus run directory under out/")
+	out := fs.String("out", "", "Output directory for diff.json and report.html under out/")
+	format := fs.String("format", "text", "Terminal output format: text or json")
+	noHTML := fs.Bool("no-html", false, "Do not generate report.html")
+	failOnRegression := fs.Bool("fail-on-regression", false, "Exit non-zero for high-confidence regressions above --max-regressions")
+	maxRegressions := fs.Int("max-regressions", 0, "Allowed high-confidence regressions with --fail-on-regression")
+	minSampleSize := fs.Int("min-sample-size", 10, "Minimum samples per command/tool for confident claims")
+	failureRateDelta := fs.Float64("failure-rate-delta", 0.05, "Meaningful absolute rate delta")
+	relativeCountDelta := fs.Float64("relative-count-delta", 0.25, "Meaningful relative count delta")
+	durationDelta := fs.Float64("duration-delta", 0.20, "Meaningful relative duration delta")
+	unknownStatusWarningThreshold := fs.Float64("unknown-status-warning-threshold", 0.80, "Unknown status warning threshold")
+	noBuild := fs.Bool("no-build", false, "Skip Docker image rebuild")
+	dockerNet, dockerAddHost := bindDockerRunFlags(fs)
+	fs.Parse(args)
+
+	if *baseline == "" || *candidate == "" {
+		fmt.Fprintln(os.Stderr, "error: --baseline and --candidate are required")
+		return 1
+	}
+	if *format != "text" && *format != "json" {
+		fmt.Fprintln(os.Stderr, "error: --format must be text or json")
+		return 1
+	}
+	if *minSampleSize < 1 {
+		fmt.Fprintln(os.Stderr, "error: --min-sample-size must be >= 1")
+		return 1
+	}
+	if *maxRegressions < 0 {
+		fmt.Fprintln(os.Stderr, "error: --max-regressions must be >= 0")
+		return 1
+	}
+
+	if !*noBuild {
+		if err := buildImage(); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+	}
+
+	containerBaseline, err := resolvePathUnderOutForDocker(*baseline, true, true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	containerCandidate, err := resolvePathUnderOutForDocker(*candidate, true, true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	hostOut := *out
+	if hostOut == "" {
+		hostOut = filepath.Join("out", "diff", filepath.Base(filepath.Clean(*baseline))+"_vs_"+filepath.Base(filepath.Clean(*candidate)))
+	}
+	containerOut, err := resolvePathUnderOutForDocker(hostOut, false, true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	dockerArgs := []string{
+		"diff",
+		"--baseline", containerBaseline,
+		"--candidate", containerCandidate,
+		"--out", containerOut,
+		"--format", *format,
+		"--min-sample-size", fmt.Sprintf("%d", *minSampleSize),
+		"--failure-rate-delta", fmt.Sprintf("%g", *failureRateDelta),
+		"--relative-count-delta", fmt.Sprintf("%g", *relativeCountDelta),
+		"--duration-delta", fmt.Sprintf("%g", *durationDelta),
+		"--unknown-status-warning-threshold", fmt.Sprintf("%g", *unknownStatusWarningThreshold),
+	}
+	if *noHTML {
+		dockerArgs = append(dockerArgs, "--no-html")
+	}
+	if *failOnRegression {
+		dockerArgs = append(dockerArgs, "--fail-on-regression")
+		dockerArgs = append(dockerArgs, "--max-regressions", fmt.Sprintf("%d", *maxRegressions))
+	}
+
+	if err := dockerRun(dockerArgs, false, *dockerNet, *dockerAddHost); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	if *format != "json" {
+		fmt.Printf("Diff: %s\n", filepath.Join(hostOut, "diff.json"))
+		if !*noHTML {
+			fmt.Printf("Report: %s\n", filepath.Join(hostOut, "report.html"))
+		}
+	}
 	return 0
 }
 

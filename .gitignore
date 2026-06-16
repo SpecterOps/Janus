@@ -25,6 +25,9 @@ htmlcov/
 coverage.xml
 *.cover
 .pytest_tmp/
+.gocache/
+.gomodcache/
+.gotelemetry/
 uv.lock
 Tests/
 !tests/

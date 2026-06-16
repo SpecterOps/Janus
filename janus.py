@@ -69,6 +69,8 @@ from Core.analyzer_registry import (
 )
 from Core.analyzer_behavior_registry import build_analyzer_context
 from Core.data_quality import aggregate_data_quality, build_data_quality
+from Core.diff_compare import DiffThresholds, build_diff, high_confidence_regression_count
+from Core.diff_render_text import render_text as render_diff_text
 from Core.html_output import generate_html
 from Core.io import (
     EventValidationError,
@@ -1737,13 +1739,25 @@ def run_html(
         analyzer_name: analysis_dir / output_name
         for analyzer_name, output_name in ANALYZER_OUTPUTS.items()
     }
+    diff_path = analysis_dir / "diff.json"
+    diff_data = None
 
     # Check if at least one analysis file exists
     existing_files = [path for path in analysis_files.values() if path.exists()]
-    if not existing_files:
+    if not existing_files and not diff_path.exists():
         print(f"error: no analysis files found in {analysis_dir}", file=sys.stderr)
         print("Run 'janus analyze' first to generate analysis data.", file=sys.stderr)
         return 1
+    if not existing_files and diff_path.exists():
+        try:
+            with diff_path.open(encoding="utf-8") as f:
+                diff_data = json.load(f)
+            if not isinstance(diff_data, dict):
+                print(f"error: diff data in {diff_path} must be a JSON object", file=sys.stderr)
+                return 1
+        except Exception as e:
+            print(f"error: could not load diff data from {diff_path}: {e}", file=sys.stderr)
+            return 1
 
     # Load bundle.json for version metadata
     bundle_path = analysis_dir / "bundle.json"
@@ -1777,16 +1791,20 @@ def run_html(
             output_path,
             version_metadata=version_metadata,
             previous_versions=previous_versions,
+            diff_data=diff_data,
         )
         print(f"HTML report generated: {output_path}")
         print(f"Open report: {_format_file_uri(output_path)}")
 
         # Report which sections were included
-        for name, path in analysis_files.items():
-            if path.exists():
-                print(f"  - {name}")
-            else:
-                print(f"  ! {name} (missing)")
+        if diff_data is not None:
+            print("  - diff")
+        else:
+            for name, path in analysis_files.items():
+                if path.exists():
+                    print(f"  - {name}")
+                else:
+                    print(f"  ! {name} (missing)")
 
         if previous_versions:
             print(f"  - {len(previous_versions)} previous version(s) linked")
@@ -1795,6 +1813,55 @@ def run_html(
     except Exception as e:
         print(f"error: failed to generate HTML report: {e}", file=sys.stderr)
         return 1
+
+
+def run_diff(
+    baseline_dir: Path,
+    candidate_dir: Path,
+    out_dir: Path | None = None,
+    output_format: str = "text",
+    write_html_report: bool = True,
+    fail_on_regression: bool = False,
+    max_regressions: int = 0,
+    thresholds: DiffThresholds | None = None,
+) -> int:
+    """Compare two completed Janus output directories."""
+    if out_dir is None:
+        out_dir = Path("out/diff") / f"{baseline_dir.name}_vs_{candidate_dir.name}"
+
+    try:
+        diff = build_diff(baseline_dir, candidate_dir, thresholds)
+    except Exception as exc:
+        print(f"error: failed to build diff: {exc}", file=sys.stderr)
+        return 1
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    diff_path = out_dir / "diff.json"
+    with diff_path.open("w", encoding="utf-8") as f:
+        json.dump(diff, f, indent=2, sort_keys=True, ensure_ascii=False)
+
+    html_path = out_dir / "report.html"
+    if write_html_report:
+        rc = run_html(out_dir, html_path, include_version_links=False)
+        if rc != 0:
+            return rc
+
+    if output_format == "json":
+        print(json.dumps(diff, indent=2, sort_keys=True, ensure_ascii=False))
+    else:
+        print(render_diff_text(diff), end="")
+        print(f"\nWrote: {diff_path}")
+        if write_html_report:
+            print(f"Wrote: {html_path}")
+
+    regression_count = high_confidence_regression_count(diff)
+    if fail_on_regression and regression_count > max_regressions:
+        print(
+            f"error: {regression_count} high-confidence regression(s) exceed max {max_regressions}",
+            file=sys.stderr,
+        )
+        return 2
+    return 0
 
 
 def main() -> None:
@@ -1988,6 +2055,79 @@ def _cli() -> int:
         action="store_true",
         default=True,
         help="Include links to previous analysis versions (default: true)",
+    )
+
+    # -- diff subcommand ------------------------------------------------------
+    diff_parser = subparsers.add_parser("diff", help="Compare two completed Janus output directories")
+    diff_parser.add_argument(
+        "--baseline",
+        type=Path,
+        required=True,
+        help="Baseline Janus run directory",
+    )
+    diff_parser.add_argument(
+        "--candidate",
+        type=Path,
+        required=True,
+        help="Candidate Janus run directory",
+    )
+    diff_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Output directory for diff.json and report.html (default: out/diff/<baseline>_vs_<candidate>)",
+    )
+    diff_parser.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Terminal output format (default: text)",
+    )
+    diff_parser.add_argument(
+        "--no-html",
+        action="store_true",
+        help="Do not generate report.html",
+    )
+    diff_parser.add_argument(
+        "--fail-on-regression",
+        action="store_true",
+        help="Exit non-zero when high-confidence regressions exceed --max-regressions",
+    )
+    diff_parser.add_argument(
+        "--max-regressions",
+        type=int,
+        default=0,
+        help="Allowed high-confidence regressions when --fail-on-regression is set (default: 0)",
+    )
+    diff_parser.add_argument(
+        "--min-sample-size",
+        type=int,
+        default=10,
+        help="Minimum samples per command/tool for confident claims (default: 10)",
+    )
+    diff_parser.add_argument(
+        "--failure-rate-delta",
+        type=float,
+        default=0.05,
+        help="Meaningful absolute rate delta, as a fraction (default: 0.05)",
+    )
+    diff_parser.add_argument(
+        "--relative-count-delta",
+        type=float,
+        default=0.25,
+        help="Meaningful relative count delta, as a fraction (default: 0.25)",
+    )
+    diff_parser.add_argument(
+        "--duration-delta",
+        type=float,
+        default=0.20,
+        help="Meaningful relative duration delta, as a fraction (default: 0.20)",
+    )
+    diff_parser.add_argument(
+        "--unknown-status-warning-threshold",
+        type=float,
+        default=0.80,
+        help="Unknown status warning threshold, as a fraction (default: 0.80)",
     )
 
     # -- partial-load subcommand -----------------------------------------------
@@ -2413,6 +2553,30 @@ def _cli() -> int:
             analysis_dir=args.analysis_dir,
             output_path=args.output,
             include_version_links=args.include_version_links,
+        )
+    elif args.command == "diff":
+        if args.min_sample_size < 1:
+            print("error: --min-sample-size must be >= 1", file=sys.stderr)
+            return 1
+        if args.max_regressions < 0:
+            print("error: --max-regressions must be >= 0", file=sys.stderr)
+            return 1
+        thresholds = DiffThresholds(
+            min_sample_size=args.min_sample_size,
+            failure_rate_delta=args.failure_rate_delta,
+            relative_count_delta=args.relative_count_delta,
+            duration_delta=args.duration_delta,
+            unknown_status_warning_threshold=args.unknown_status_warning_threshold,
+        )
+        return run_diff(
+            baseline_dir=args.baseline,
+            candidate_dir=args.candidate,
+            out_dir=args.out,
+            output_format=args.format,
+            write_html_report=not args.no_html,
+            fail_on_regression=args.fail_on_regression,
+            max_regressions=args.max_regressions,
+            thresholds=thresholds,
         )
     elif args.command == "partial-load":
         partial_cfg = load_config(args.config)

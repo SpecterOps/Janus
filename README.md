@@ -30,6 +30,7 @@ cp Config/janus.example.yml Config/janus.yml # set source, redaction settings, e
 ./janus-cli report --json out/complete/operation-chimera_20260306_174521/ 
 ./janus-cli merge --inputs out/partial/op1/ out/partial/op2/ --output out/merged/ 
 ./janus-cli multi-analyze --pattern "out/partial/*/" --output out/combined/ 
+./janus-cli diff --baseline out/complete/op_old/ --candidate out/complete/op_new/
 ./janus-cli pull --source cobaltstrike 
 ./janus-cli run --source cobaltstrike 
 ./janus-cli run --source outflank --log-path out/input/TSO8IEAB.json
@@ -71,6 +72,22 @@ cp Config/janus.example.yml Config/janus.yml # set source, redaction settings, e
 `friction-score` combines findings from the other command analyzers into ranked operational friction candidates. Tune scoring weights and confidence thresholds in `Config/analyzer_registry.yml`, and tune recommendation actions in `Config/friction_score_registry.yml`.
 
 `parameter-entropy` works best when you tune `Config/analyzer_registry.yml` to your own workflows. The current `upload` tuning reflects our observed data and should be treated as a starting point, not a universal baseline.
+
+## Diff
+
+Compare two completed Janus output directories with:
+
+```bash
+./janus-cli diff --baseline out/complete/op_old/ --candidate out/complete/op_new/
+```
+
+The command writes `diff.json` and the standard Janus `report.html` under `out/diff/<baseline>_vs_<candidate>/` by default and prints a concise terminal summary. Use `--out` to choose another output directory, `--format json` for CI-friendly stdout, `--no-html` to skip `report.html`, and `--fail-on-regression --max-regressions 0` to exit non-zero only for high-confidence regressions.
+
+Janus compares command-level metrics first: task counts, success/failure/unknown rates, retry density, retry-to-success, median and p95 duration, dwell-time deltas, callback-loss-adjacent events, detection-adjacent events, and argument anomaly rates when those metrics are available. If analyzer JSON is missing, Janus falls back to `events.ndjson` where possible.
+
+Diff results include comparability warnings for source mismatches, large task-volume changes, substantially different command mix, and high unknown-status rates. Command-level findings are usually more reliable than aggregate trends because aggregate changes can be driven by scope or command mix rather than actual tooling quality.
+
+Confidence is based on sample size, source overlap, status fidelity, parser/retention quality, and whether a metric was directly observed or inferred. Janus uses `improvement` or `regression` only when the direction is meaningful and confidence supports the claim; otherwise it reports a low-confidence change or marks the metric not comparable.
 
 ## Skills
 

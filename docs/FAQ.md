@@ -20,20 +20,17 @@ If you prefer not to change `PATH`, call the binary directly:
 
 ### Build `janus-cli.exe` from PowerShell
 
-PowerShell does not include `make` by default. If `make cli` reports `The term 'make' is not recognized`, build the Windows executable directly from the Go module under `cmd/janus-cli`:
+PowerShell does not include `make` by default. If `make cli` reports `The term 'make' is not recognized`, build the Windows executable directly from the repository root:
 
 ```powershell
 cd C:\path\to\Janus
 $env:PATH += ";C:\Program Files\Go\bin"
 
-cd .\cmd\janus-cli
-& "C:\Program Files\Go\bin\go.exe" build -ldflags="-s -w -X main.version=1.1.0" -o ..\..\janus-cli.exe .
-
-cd ..\..
+& "C:\Program Files\Go\bin\go.exe" build -ldflags="-s -w -X main.version=1.1.0" -o janus-cli.exe .\cmd\janus-cli
 .\janus-cli.exe version
 ```
 
-Run `go build` from `cmd\janus-cli`, not the repository root. The repo root is not a Go module, so `go build` there reports `cannot find main module`.
+The repository root has the Go module metadata for `janus-cli`, so run wrapper builds from the root unless you are using `make cli`.
 
 If you are building from WSL or another shell with `make`, use:
 

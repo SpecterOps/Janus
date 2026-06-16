@@ -1,4 +1,4 @@
-module github.com/garland-cli/janus-cli
+module github.com/SpecterOps/Janus
 
 go 1.22
 

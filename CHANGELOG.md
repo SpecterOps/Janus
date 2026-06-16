@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Run Diff Command**: Added `janus-cli diff` / `janus diff` to compare a baseline run with a candidate run, emit deterministic `diff.json`, render comparison results through the standard `report.html` flow, and classify command-level regressions/improvements with confidence and comparability warnings.
 - **Parser Quality Dashboard**: Added a report **Data Quality** section and structured `bundle.json` `data_quality` entries so parser/source fidelity is visible per source, including skipped records, invalid timestamps, fallback task IDs, status distributions, retention modes, parser malformed-count metadata, and confidence warnings for limited analysis categories.
 - **Friction Score Analyzer**: Added `friction-score`, a command ranking analyzer that combines failure rate, retry density, retry-to-success behavior, duration, callback health, and argument anomaly signals to surface the highest-friction commands in an operation.
 - **Friction score recommendation registry**: Added `Config/friction_score_registry.yml` and `Core/friction_score_registry.py` so action recommendations can be managed by rule, including suppression and fallback behavior for commands where friction does not necessarily imply an automation candidate.

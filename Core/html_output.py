@@ -540,6 +540,7 @@ def generate_html(
     output_path: Path,
     version_metadata: dict | None = None,
     previous_versions: list[dict] | None = None,
+    diff_data: dict | None = None,
 ) -> None:
     """
     Generate HTML report from analysis JSON files.
@@ -549,8 +550,22 @@ def generate_html(
         output_path: Where to write the HTML report
         version_metadata: Optional bundle metadata with version info
         previous_versions: Optional list of previous analysis versions
+        diff_data: Optional run-diff payload from diff.json
     """
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    if diff_data is not None:
+        report_overview = _render_diff_report_header(
+            diff_data,
+            version_metadata,
+            report_generated_at=timestamp,
+        )
+        body_content = _render_diff_report(diff_data)
+        html_content = _get_html_template(report_overview, body_content)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as f:
+            f.write(html_content)
+        return
 
     # Derive Mythic UI base URL for hyperlinking callback/task IDs
     base_url = _mythic_base_url(
@@ -917,6 +932,252 @@ def _render_report_header(
     content = f"{title_html}{meta_html}{warnings_html}{privacy_html}{findings_html}{prev_html}"
     header_cls = "report-header has-issues" if (findings or warnings or suppressed_sections) else "report-header"
     return _collapsible_section("Report Overview", content, open_by_default=True, extra_class=header_cls)
+
+
+def _render_diff_report_header(
+    diff: dict,
+    metadata: dict | None,
+    *,
+    report_generated_at: str = "",
+) -> str:
+    """Render the standard report overview for run-to-run diffs."""
+    baseline = diff.get("baseline") if isinstance(diff.get("baseline"), dict) else {}
+    candidate = diff.get("candidate") if isinstance(diff.get("candidate"), dict) else {}
+    comparability = diff.get("comparability") if isinstance(diff.get("comparability"), dict) else {}
+    summary = diff.get("summary") if isinstance(diff.get("summary"), dict) else {}
+    warnings = [str(w) for w in comparability.get("warnings", []) if str(w).strip()]
+
+    gen_esc = html.escape(report_generated_at) if report_generated_at else "-"
+    title_html = (
+        '<h2 class="report-overview-title">Janus Diff Report '
+        f'<span class="report-generated-sub">- Generated: {gen_esc}</span></h2>'
+    )
+    janus_ver = html.escape(str((metadata or {}).get("janus_version", "N/A")))
+    baseline_sources = _format_diff_source_list(baseline.get("sources"))
+    candidate_sources = _format_diff_source_list(candidate.get("sources"))
+    status = html.escape(str(comparability.get("status") or "unknown"))
+
+    meta_html = f"""
+    <dl class="meta-grid">
+        <dt>Baseline</dt>
+        <dd><code>{html.escape(str(baseline.get("run_id") or "baseline"))}</code> ({_format_diff_count(baseline.get("total_tasks"))} tasks)</dd>
+        <dt>Candidate</dt>
+        <dd><code>{html.escape(str(candidate.get("run_id") or "candidate"))}</code> ({_format_diff_count(candidate.get("total_tasks"))} tasks)</dd>
+        <dt>Sources</dt>
+        <dd>Baseline {baseline_sources} &middot; Candidate {candidate_sources}</dd>
+        <dt>Comparability</dt>
+        <dd><code>{status}</code></dd>
+        <dt>Janus Version</dt>
+        <dd><code>{janus_ver}</code></dd>
+    </dl>
+    """
+
+    warning_html = ""
+    if warnings:
+        warning_items = "".join(f"<li>{html.escape(w)}</li>" for w in warnings)
+        warning_html = f"""
+        <div class="quality-warning">
+            <h3>Comparability Warning</h3>
+            <ul class="findings-list">{warning_items}</ul>
+        </div>
+        """
+
+    findings = [
+        f"{_format_diff_count(summary.get('likely_regressions'))} likely regression(s)",
+        f"{_format_diff_count(summary.get('likely_improvements'))} likely improvement(s)",
+        f"{_format_diff_count(summary.get('low_confidence_changes'))} low-confidence change(s)",
+        f"{_format_diff_count(summary.get('not_comparable'))} non-comparable metric(s)",
+    ]
+    high_confidence_regressions = [
+        finding
+        for finding in diff.get("findings", [])
+        if isinstance(finding, dict)
+        and finding.get("classification") == "regression"
+        and finding.get("confidence") == "high"
+    ]
+    if high_confidence_regressions:
+        findings.append(f"{len(high_confidence_regressions)} high-confidence regression(s)")
+    findings_html = (
+        '<h3>Key Findings</h3><ul class="findings-list findings-issues">'
+        + "".join(f"<li>{html.escape(item)}</li>" for item in findings)
+        + "</ul>"
+    )
+
+    content = f"{title_html}{meta_html}{warning_html}{findings_html}"
+    header_cls = "report-header has-issues" if warnings or high_confidence_regressions else "report-header"
+    return _collapsible_section("Report Overview", content, open_by_default=True, extra_class=header_cls)
+
+
+def _render_diff_report(diff: dict) -> str:
+    """Render diff.json through the shared report template."""
+    sections = [
+        _render_diff_summary(diff),
+        _render_diff_findings(diff),
+        _render_diff_entity_presence(diff),
+        _render_diff_raw_json(diff),
+    ]
+    return "\n".join(section for section in sections if section.strip())
+
+
+def _render_diff_summary(diff: dict) -> str:
+    summary = diff.get("summary") if isinstance(diff.get("summary"), dict) else {}
+    thresholds = diff.get("thresholds") if isinstance(diff.get("thresholds"), dict) else {}
+    comparability = diff.get("comparability") if isinstance(diff.get("comparability"), dict) else {}
+    warning_count = len(comparability.get("warnings") or [])
+
+    cards = [
+        ("Likely regressions", summary.get("likely_regressions", 0), "classification-regression"),
+        ("Likely improvements", summary.get("likely_improvements", 0), "classification-improvement"),
+        ("Low-confidence changes", summary.get("low_confidence_changes", 0), "classification-low-confidence-change"),
+        ("Non-comparable metrics", summary.get("not_comparable", 0), "classification-not-comparable"),
+    ]
+    card_html = "".join(
+        f'<div class="diff-summary-card {cls}"><strong>{_format_diff_count(value)}</strong>{html.escape(label)}</div>'
+        for label, value, cls in cards
+    )
+
+    threshold_rows = "".join(
+        "<tr>"
+        f"<td><code>{html.escape(str(key))}</code></td>"
+        f"<td>{html.escape(str(value))}</td>"
+        "</tr>"
+        for key, value in sorted(thresholds.items())
+    ) or "<tr><td colspan='2'>No thresholds recorded.</td></tr>"
+
+    content = f"""
+    <div class="diff-summary-grid">{card_html}</div>
+    <dl class="meta-grid">
+        <dt>Comparability Status</dt><dd><code>{html.escape(str(comparability.get("status") or "unknown"))}</code></dd>
+        <dt>Warnings</dt><dd>{warning_count}</dd>
+        <dt>Command Mix Delta</dt><dd>{_format_diff_percent(comparability.get("command_mix_delta"))}</dd>
+    </dl>
+    <div class="table-wrap">
+        <table class="sortable">
+            <thead><tr><th>Threshold</th><th>Value</th></tr></thead>
+            <tbody>{threshold_rows}</tbody>
+        </table>
+    </div>
+    """
+    return _collapsible_section("Diff Summary", content, open_by_default=True)
+
+
+def _render_diff_findings(diff: dict) -> str:
+    findings = [f for f in diff.get("findings", []) if isinstance(f, dict)]
+    rows = []
+    for finding in findings:
+        classification = str(finding.get("classification") or "")
+        cls = _diff_classification_class(classification)
+        entity = f"{finding.get('entity_type', '')}: {finding.get('entity', '')}"
+        relative = _format_diff_percent(finding.get("relative_delta"))
+        rows.append(
+            "<tr>"
+            f'<td class="{cls}">{html.escape(classification)}</td>'
+            f"<td>{html.escape(str(finding.get('confidence') or ''))}</td>"
+            f"<td>{html.escape(entity)}</td>"
+            f"<td><code>{html.escape(str(finding.get('metric') or ''))}</code></td>"
+            f"<td>{html.escape(str(finding.get('baseline_value')))}</td>"
+            f"<td>{html.escape(str(finding.get('candidate_value')))}</td>"
+            f"<td>{html.escape(str(finding.get('absolute_delta')))}</td>"
+            f"<td>{relative}</td>"
+            f"<td>{html.escape(str(finding.get('reason') or finding.get('display') or ''))}</td>"
+            "</tr>"
+        )
+    if not rows:
+        rows.append("<tr><td colspan='9'>No meaningful metric deltas crossed the configured thresholds.</td></tr>")
+
+    content = f"""
+    <div class="table-wrap">
+        <table class="sortable wide-table">
+            <thead>
+                <tr>
+                    <th>Class</th>
+                    <th>Confidence</th>
+                    <th>Entity</th>
+                    <th>Metric</th>
+                    <th>Baseline</th>
+                    <th>Candidate</th>
+                    <th>Delta</th>
+                    <th>Relative</th>
+                    <th>Reason</th>
+                </tr>
+            </thead>
+            <tbody>{''.join(rows)}</tbody>
+        </table>
+    </div>
+    """
+    return _collapsible_section("Diff Findings", content, open_by_default=True)
+
+
+def _render_diff_entity_presence(diff: dict) -> str:
+    new_entities = [e for e in diff.get("new_entities", []) if isinstance(e, dict)]
+    removed_entities = [e for e in diff.get("removed_entities", []) if isinstance(e, dict)]
+    if not new_entities and not removed_entities:
+        return ""
+
+    def _rows(items: list[dict], count_key: str) -> str:
+        if not items:
+            return "<tr><td colspan='3'>None</td></tr>"
+        return "".join(
+            "<tr>"
+            f"<td>{html.escape(str(item.get('entity_type') or ''))}</td>"
+            f"<td><code>{html.escape(str(item.get('entity') or ''))}</code></td>"
+            f"<td>{_format_diff_count(item.get(count_key))}</td>"
+            "</tr>"
+            for item in items
+        )
+
+    content = f"""
+    <h3>New Commands</h3>
+    <div class="table-wrap">
+        <table class="sortable">
+            <thead><tr><th>Type</th><th>Entity</th><th>Candidate Count</th></tr></thead>
+            <tbody>{_rows(new_entities, "candidate_count")}</tbody>
+        </table>
+    </div>
+    <h3>Removed Commands</h3>
+    <div class="table-wrap">
+        <table class="sortable">
+            <thead><tr><th>Type</th><th>Entity</th><th>Baseline Count</th></tr></thead>
+            <tbody>{_rows(removed_entities, "baseline_count")}</tbody>
+        </table>
+    </div>
+    """
+    return _collapsible_section("Command Presence Changes", content)
+
+
+def _render_diff_raw_json(diff: dict) -> str:
+    raw = html.escape(json.dumps(diff, indent=2, sort_keys=True, ensure_ascii=False))
+    content = f'<pre class="json-dump">{raw}</pre>'
+    return _collapsible_section("diff.json", content)
+
+
+def _format_diff_count(value: object) -> str:
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _format_diff_percent(value: object) -> str:
+    if value is None:
+        return ""
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return html.escape(str(value))
+
+
+def _format_diff_source_list(value: object) -> str:
+    if not isinstance(value, list) or not value:
+        return "<code>unknown</code>"
+    return ", ".join(f"<code>{html.escape(str(item))}</code>" for item in value)
+
+
+def _diff_classification_class(classification: str) -> str:
+    normalized = classification.replace("_", "-").replace(" ", "-")
+    if not normalized:
+        normalized = "unknown"
+    return "classification-" + html.escape(normalized)
 
 
 def _summary_visualization_content(data: dict) -> str:
@@ -3373,6 +3634,59 @@ def _get_html_template(report_overview_html: str, body_content: str) -> str:
 
         .data-quality-table td {{
             white-space: normal;
+        }}
+
+        .diff-summary-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin: 14px 0 18px;
+        }}
+
+        .diff-summary-card {{
+            background-color: #f7f8fa;
+            border-left: 4px solid #4a4570;
+            padding: 12px 14px;
+            border-radius: 4px;
+            color: #0D0A30;
+        }}
+
+        .diff-summary-card strong {{
+            display: block;
+            font-size: 1.8em;
+            line-height: 1;
+            margin-bottom: 6px;
+        }}
+
+        .classification-regression {{
+            color: #EA1412;
+            font-weight: 700;
+        }}
+
+        .classification-improvement {{
+            color: #00875f;
+            font-weight: 700;
+        }}
+
+        .classification-low-confidence-change {{
+            color: #8a5a00;
+            font-weight: 700;
+        }}
+
+        .classification-not-comparable,
+        .classification-not_comparable {{
+            color: #4a4570;
+            font-weight: 700;
+        }}
+
+        .json-dump {{
+            white-space: pre-wrap;
+            overflow-x: auto;
+            max-height: 520px;
+            background-color: #111820;
+            color: #e6edf3;
+            padding: 14px;
+            border-radius: 4px;
         }}
 
         .operations-list {{

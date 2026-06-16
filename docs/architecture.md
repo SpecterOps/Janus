@@ -68,6 +68,7 @@ This separation matters operationally:
 | `report` | Resolve the latest analysis directory | Generate HTML from analyzer output |
 | `run` | Chain source pull, analyze, and report | Execute the full pipeline |
 | `merge` / `multi-analyze` | Expand input paths or patterns | Merge normalized runs, then optionally run the multi-op analyzer set and report |
+| `diff` | Resolve two completed run directories under `out/` | Compare baseline and candidate outputs, then write `diff.json` and optional `report.html` |
 | `status` / `config` / `version` | Inspect local state | n/a |
 
 ## Source Coverage
@@ -312,6 +313,20 @@ Important merge behavior:
 - if an input run has a missing, invalid, or duplicate `operation_id`, Janus remaps it during merge
 - remap details are recorded in merged `bundle.json`
 - analyzers then join on the merged `(operation_id, task_id)` pairs
+
+## Run Diffing
+
+`janus-cli diff --baseline <run_dir> --candidate <run_dir>` compares two completed Janus output directories. The diff layer is local-only and reads existing artifacts in this order:
+
+- `bundle.json` for run identity, source metadata, retention settings, and parser/data-quality warnings
+- analyzer JSON outputs for structured metrics when present
+- `events.ndjson` as a fallback for command counts, status rates, retries, durations, dwell-time, and callback-health-adjacent signals
+
+The command writes a deterministic `diff.json` for automation and renders the same comparison through the standard Janus `report.html` flow unless `--no-html` is supplied. `--format json` prints the same structured diff to stdout, and `--fail-on-regression` exits non-zero only when high-confidence regressions exceed `--max-regressions`.
+
+Diff findings are intentionally scoped. Command-level comparisons are emphasized because aggregate trends can be distorted by different task volume, source coverage, or command mix. The comparability section warns when source sets differ, task volume differs by more than the configured threshold, command mix changes substantially, or unknown result status is high enough to undermine failure-rate claims.
+
+Confidence levels consider sample size, unknown-status percentage, source overlap, missing analyzer artifacts, parser/data-quality warnings, retention settings, and whether a metric was directly observed or inferred. Janus only labels a finding as `improvement` or `regression` when the metric direction is clear and confidence is sufficient. Otherwise the finding is reported as `low-confidence change` or `not_comparable`.
 
 This design lets Janus compare patterns across engagements without changing the single-operation event model.
 
