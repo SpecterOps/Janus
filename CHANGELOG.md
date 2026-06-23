@@ -5,7 +5,9 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 2026-06-09
+## [Unreleased]
+
+## [1.2.0] - 2026-06-23
 
 ### Added
 
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Analyzer behavior registry**: Updated registry loading and metadata export to include friction score configuration.
 - **HTML report**: Added friction score output rendering so reports display top friction candidates, component metrics, confidence, and recommendation metadata.
 - **Core I/O and output formats**: Updated bundle/output handling and existing analyzer integration points to carry friction score metadata and emit `friction-score.json` alongside the other analyzer artifacts.
+- **Analyzer internals**: Reduced duplicated analyzer dispatch and event-indexing logic by consolidating analyzer execution in `janus.py` and shared task/result helpers in `Core/event_utils.py`, preserving CLI behavior and analyzer output schemas.
 
 ## [1.1.0] - 2026-06-05
 

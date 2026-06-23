@@ -9,7 +9,8 @@ patterns to answer: What typically happens before/after long-running commands?
 from collections import Counter
 
 from Core.analyzer_command_grouping import analyzer_command_group
-from Core.event_utils import seconds_between as _time_diff_seconds
+from Core.event_utils import duration_from_task_result
+from Core.event_utils import group_tasks_by_operation_sorted, index_tasks_by_key
 from Core.event_utils import task_key as _task_key
 
 from Analyzers.CommandAnalysis.command_duration import (
@@ -119,21 +120,10 @@ def _build_ordered_task_index(task_events: list[dict]) -> tuple[dict[int, list[d
     Raises:
         ValueError: If any task has null/empty timestamp.
     """
-    for t in task_events:
-        ts = t.get("timestamp")
-        if ts is None or ts == "":
-            raise ValueError(f"Task {t.get('task_id')} has null or empty timestamp")
-
-    ordered_by_operation: dict[int, list[dict]] = {}
+    ordered_by_operation = group_tasks_by_operation_sorted(task_events)
     index_map: dict[tuple[int, int], int] = {}
-    grouped: dict[int, list[dict]] = {}
-    for t in task_events:
-        grouped.setdefault(t.get("operation_id", 0), []).append(t)
-
-    for operation_id, tasks in grouped.items():
-        ordered = sorted(tasks, key=lambda e: e["timestamp"])
-        ordered_by_operation[operation_id] = ordered
-        for i, task in enumerate(ordered):
+    for tasks in ordered_by_operation.values():
+        for i, task in enumerate(tasks):
             index_map[_task_key(task)] = i
 
     return ordered_by_operation, index_map
@@ -147,20 +137,15 @@ def _build_duration_lookup(
     Uses processing_timestamp (agent pickup time) when available to exclude
     callback check-in overhead, falling back to the task submitted timestamp.
     """
-    task_by_id: dict[tuple[int, int], str] = {}
-    for t in task_events:
-        start_ts = t.get("processing_timestamp") or t["timestamp"]
-        task_by_id[_task_key(t)] = start_ts
-
+    task_by_id = index_tasks_by_key(task_events)
     lookup: dict[tuple[int, int], float] = {}
     for r in result_events:
         task_id = _task_key(r)
-        if task_id not in task_by_id:
+        task = task_by_id.get(task_id)
+        if task is None:
             continue
-        task_ts = task_by_id[task_id]
-        result_ts = r["timestamp"]
-        duration = _time_diff_seconds(task_ts, result_ts)
-        if duration is not None and duration >= 0:
+        duration = duration_from_task_result(task, r)
+        if duration is not None:
             lookup[task_id] = round(duration, 2)
     return lookup
 

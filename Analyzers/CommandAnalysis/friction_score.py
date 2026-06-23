@@ -15,8 +15,10 @@ from typing import Any
 from Core.analyzer_behavior_registry import build_analyzer_context
 from Core.analyzer_command_grouping import analyzer_command_group, retry_sequence_group_key
 from Core.event_utils import callback_key as _callback_key
+from Core.event_utils import duration_from_task_result
+from Core.event_utils import index_results_by_key, index_tasks_by_key
+from Core.event_utils import iter_retry_sequences
 from Core.event_utils import percentile as _pct
-from Core.event_utils import seconds_between as _time_diff_seconds
 from Core.event_utils import task_key as _task_key
 from Core.friction_score_registry import FrictionScoreRegistry
 
@@ -168,8 +170,8 @@ def analyze(
     median_cap = float(duration_caps.get("median_seconds", 300.0))
     p95_cap = float(duration_caps.get("p95_seconds", 900.0))
 
-    task_by_id = {_task_key(task): task for task in task_events}
-    results_by_task = {_task_key(result): result for result in result_events}
+    task_by_id = index_tasks_by_key(task_events)
+    results_by_task = index_results_by_key(result_events)
 
     buckets: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
@@ -209,44 +211,24 @@ def analyze(
             bucket["duration_excluded_count"] += 1
             continue
 
-        start_ts = task.get("processing_timestamp") or task.get("timestamp", "")
-        duration = _time_diff_seconds(start_ts, result.get("timestamp", ""))
-        if duration is None or duration < 0 or duration > MAX_WALL_CLOCK_SECONDS:
+        duration = duration_from_task_result(task, result, max_seconds=MAX_WALL_CLOCK_SECONDS)
+        if duration is None:
             continue
         bucket["durations"].append(duration)
 
-    retry_groups: dict[tuple, list[dict]] = defaultdict(list)
-    for task in task_events:
-        retry_groups[retry_sequence_group_key(task)].append(task)
-    for tasks in retry_groups.values():
-        tasks.sort(key=lambda task: task.get("timestamp", ""))
-        sequence: list[dict] = []
-
-        def flush_sequence() -> None:
-            if len(sequence) < 2:
-                return
-            command_name = analyzer_command_group(sequence[0])
-            statuses = [
-                results_by_task.get(_task_key(task), {}).get("status", "unknown")
-                for task in sequence
-            ]
-            bucket = buckets[command_name]
-            bucket["retry_sequence_count"] += 1
-            bucket["retry_attempt_count"] += len(sequence) - 1
-            if any(status == "error" for status in statuses) and statuses[-1] == "success":
-                bucket["retry_success_count"] += 1
-
-        for task in tasks:
-            if not sequence:
-                sequence = [task]
-                continue
-            gap = _time_diff_seconds(sequence[-1].get("timestamp", ""), task.get("timestamp", ""))
-            if gap is not None and gap <= RETRY_WINDOW_SECONDS:
-                sequence.append(task)
-                continue
-            flush_sequence()
-            sequence = [task]
-        flush_sequence()
+    for _group_key, sequence in iter_retry_sequences(
+        task_events, RETRY_WINDOW_SECONDS, retry_sequence_group_key
+    ):
+        command_name = analyzer_command_group(sequence[0])
+        statuses = [
+            results_by_task.get(_task_key(task), {}).get("status", "unknown")
+            for task in sequence
+        ]
+        bucket = buckets[command_name]
+        bucket["retry_sequence_count"] += 1
+        bucket["retry_attempt_count"] += len(sequence) - 1
+        if any(status == "error" for status in statuses) and statuses[-1] == "success":
+            bucket["retry_success_count"] += 1
 
     unhealthy_callbacks: set[str] = set()
     tasks_by_callback: dict[str, list[dict]] = defaultdict(list)

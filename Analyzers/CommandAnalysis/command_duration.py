@@ -21,7 +21,7 @@ from collections import defaultdict
 
 from Core.analyzer_behavior_registry import build_analyzer_context
 from Core.analyzer_command_grouping import analyzer_command_group
-from Core.event_utils import seconds_between as _time_diff_seconds
+from Core.event_utils import duration_from_task_result
 from Core.event_utils import task_key as _task_key
 from Core.output_rule import copy_task_retention_fields
 
@@ -65,7 +65,6 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
             continue
 
         task_info = task_by_id[task_id]
-        result_timestamp = r["timestamp"]
         bucket = task_info["analyzer_group"]
         behavior = registry.resolve({
             "source": task_info["source"],
@@ -79,7 +78,7 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
             # than operator friction.
             registry_excluded_by_command[bucket] += 1
 
-        wall_clock = _time_diff_seconds(task_info["timestamp"], result_timestamp)
+        wall_clock = duration_from_task_result(task_info, r, prefer_processing_timestamp=False)
         if wall_clock is None or wall_clock < 0:
             continue
         if wall_clock > MAX_WALL_CLOCK_SECONDS:
@@ -91,7 +90,7 @@ def analyze(task_events: list[dict], result_events: list[dict], context: dict | 
         processing_ts = task_info["processing_timestamp"]
         agent_duration = None
         if processing_ts:
-            agent_duration = _time_diff_seconds(processing_ts, result_timestamp)
+            agent_duration = duration_from_task_result(task_info, r)
             if agent_duration is None or agent_duration < 0:
                 agent_duration = None
             else:

@@ -13,6 +13,7 @@ import json
 from collections import defaultdict
 
 from Core.analyzer_command_grouping import retry_sequence_group_key
+from Core.event_utils import index_results_by_key
 from Core.event_utils import seconds_between as _time_diff_seconds
 from Core.event_utils import task_key as _task_key
 from Core.output_rule import copy_task_retention_fields
@@ -29,9 +30,10 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
         Dict with analyzer name, retry patterns list, and summary statistics.
     """
     # Build result lookup: (operation_id, task_id) -> status
-    result_by_task: dict[tuple[int, int], str] = {}
-    for r in result_events:
-        result_by_task[_task_key(r)] = r["status"]
+    result_by_task = {
+        task_id: result["status"]
+        for task_id, result in index_results_by_key(result_events).items()
+    }
 
     # Group tasks by (operation_id, command_name) and sort by timestamp.
     # PTY in-session synthetics share bucket pty_in_session but are split by shell command.

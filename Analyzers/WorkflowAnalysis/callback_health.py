@@ -11,6 +11,7 @@ Requires callback_id on task events (Mythic parser ≥ v0.4).
 from collections import defaultdict
 
 from Core.event_utils import callback_key as _callback_key
+from Core.event_utils import index_results_by_key
 from Core.event_utils import task_key as _task_key
 from Core.output_rule import copy_task_retention_fields
 
@@ -18,9 +19,10 @@ CONSECUTIVE_FAILURE_THRESHOLD = 3
 
 
 def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
-    result_by_task: dict[tuple[int, int], str] = {}
-    for r in result_events:
-        result_by_task[_task_key(r)] = r.get("status", "unknown")
+    result_by_task = {
+        task_id: result.get("status", "unknown")
+        for task_id, result in index_results_by_key(result_events).items()
+    }
 
     # Group tasks by (operation_id, callback_id), preserving timestamp order.
     by_callback: dict[str, list[dict]] = defaultdict(list)

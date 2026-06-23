@@ -165,29 +165,36 @@ def _print_mythic_request_hints(endpoint: str, verify_tls: bool, exc_text: str) 
                 file=sys.stderr,
             )
 
-ANALYZER_FUNCTIONS = {
-    "summary-visualization": summary_visualization,
-    "command-failure-summary": command_failure_summary,
-    "command-retry-success": command_retry_success,
-    "command-duration": command_duration,
-    "friction-score": friction_score,
-    "outlier-context": outlier_context,
-    "callback-health": callback_health,
-    "av-tracker": av_tracker,
-    "dwell-time": dwell_time,
-    "parameter-entropy": parameter_entropy,
-    "argument-position-profile": argument_position_profile,
-    "tool-dump": tool_dump,
+ANALYZER_SPECS = {
+    "summary-visualization": (summary_visualization, False),
+    "command-failure-summary": (command_failure_summary, False),
+    "command-retry-success": (command_retry_success, False),
+    "command-duration": (command_duration, True),
+    "friction-score": (friction_score, True),
+    "outlier-context": (outlier_context, True),
+    "callback-health": (callback_health, False),
+    "av-tracker": (av_tracker, False),
+    "dwell-time": (dwell_time, False),
+    "parameter-entropy": (parameter_entropy, True),
+    "argument-position-profile": (argument_position_profile, True),
+    "tool-dump": (tool_dump, True),
 }
 
-REGISTRY_AWARE_ANALYZERS = {
-    "command-duration",
-    "friction-score",
-    "parameter-entropy",
-    "outlier-context",
-    "argument-position-profile",
-    "tool-dump",
-}
+SINGLE_ANALYZE_METADATA_KEYS = (
+    "operation_id", "operation_name", "operation_slug",
+    "mythic_endpoint", "ghostwriter_endpoint",
+    "cobaltstrike_rest_endpoint", "outflank_log_path",
+    "analysis_version", "analysis_timestamp", "janus_version",
+)
+INGEST_ANALYZER_METADATA_KEYS = (
+    "operation_id", "operation_name", "operation_slug",
+    "analysis_version", "analysis_timestamp", "janus_version",
+)
+OUTFLANK_ANALYZER_METADATA_KEYS = INGEST_ANALYZER_METADATA_KEYS + ("outflank_log_path",)
+MULTI_ANALYZE_METADATA_KEYS = (
+    "operation_name", "operation_slug", "operation_count",
+    "analysis_timestamp", "janus_version", "source",
+)
 
 
 def _build_runtime_analyzer_context(output_dir: Path | None = None) -> dict:
@@ -236,10 +243,207 @@ def _merge_common_metadata(result: dict, common_metadata: dict) -> dict:
     return merged
 
 
-def _run_analyzer(analyzer_name: str, analyzer_func, task_events: list[dict], result_events: list[dict], context: dict) -> dict:
-    if analyzer_name in REGISTRY_AWARE_ANALYZERS:
+def _build_analyzer_metadata(
+    analyzer_name: str,
+    task_events: list[dict],
+    result_events: list[dict],
+    bundle_metadata: dict | None = None,
+    metadata_keys: tuple[str, ...] = (),
+    retention_info: dict | None = None,
+) -> dict:
+    analyzer_metadata = {
+        "analyzer": analyzer_name,
+        "metadata": {
+            "events_analyzed": len(task_events) + len(result_events),
+        },
+    }
+    bundle_metadata = bundle_metadata or {}
+    for key in metadata_keys:
+        if key in bundle_metadata:
+            analyzer_metadata["metadata"][key] = bundle_metadata[key]
+
+    if retention_info and retention_info.get("privacy_limited"):
+        analyzer_metadata["metadata"]["retention"] = {
+            "arguments_retained": retention_info["arguments_retained"],
+            "output_retained": retention_info["output_retained"],
+            "observed_arguments_rules": retention_info["observed_arguments_rules"],
+            "observed_output_rules": retention_info["observed_output_rules"],
+        }
+        warnings = privacy_warnings_for_analyzer(analyzer_name, retention_info)
+        if warnings:
+            analyzer_metadata["metadata"]["privacy_warnings"] = warnings
+    return analyzer_metadata
+
+
+def _run_analyzer_raw(
+    analyzer_name: str,
+    task_events: list[dict],
+    result_events: list[dict],
+    context: dict,
+) -> dict:
+    analyzer_func, needs_context = ANALYZER_SPECS[analyzer_name]
+    if needs_context:
         return analyzer_func(task_events, result_events, context)
     return analyzer_func(task_events, result_events)
+
+
+def _write_analyzer_result(out_dir: Path, analyzer_name: str, result: dict) -> Path:
+    out_path = out_dir / ANALYZER_OUTPUTS[analyzer_name]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2, ensure_ascii=False)
+    return out_path
+
+
+def _run_analyzer_by_name(
+    analyzer_name: str,
+    task_events: list[dict],
+    result_events: list[dict],
+    out_dir: Path,
+    context: dict,
+    *,
+    bundle_metadata: dict | None = None,
+    metadata_keys: tuple[str, ...] = (),
+    retention_info: dict | None = None,
+    print_summary: bool = False,
+    output_prefix: str = "Wrote: ",
+) -> Path:
+    result = _run_analyzer_raw(analyzer_name, task_events, result_events, context)
+    result = _merge_common_metadata(
+        result,
+        _build_analyzer_metadata(
+            analyzer_name,
+            task_events,
+            result_events,
+            bundle_metadata,
+            metadata_keys,
+            retention_info,
+        ),
+    )
+    out_path = _write_analyzer_result(out_dir, analyzer_name, result)
+    print(f"{output_prefix}{out_path}")
+    if print_summary:
+        _print_analyzer_summary(analyzer_name, result)
+    return out_path
+
+
+def _run_analyzer_set(
+    analyzer_names: list[str],
+    task_events: list[dict],
+    result_events: list[dict],
+    out_dir: Path,
+    context: dict,
+    bundle_metadata: dict,
+    metadata_keys: tuple[str, ...],
+    *,
+    blank_line_before_each: bool = False,
+    traceback_on_error: bool = False,
+) -> None:
+    for analyzer_name in analyzer_names:
+        prefix = "\n  Running" if blank_line_before_each else "  Running"
+        print(f"{prefix} {analyzer_name}...")
+        try:
+            _run_analyzer_by_name(
+                analyzer_name,
+                task_events,
+                result_events,
+                out_dir,
+                context,
+                bundle_metadata=bundle_metadata,
+                metadata_keys=metadata_keys,
+                output_prefix="    - ",
+            )
+        except Exception as e:
+            print(f"    ! Failed: {e}", file=sys.stderr)
+            if traceback_on_error:
+                traceback.print_exc()
+
+
+def _print_analyzer_summary(analyzer_name: str, result: dict) -> None:
+    if analyzer_name == "summary-visualization":
+        sd = result["status_distribution"]
+        print(f"Status: {sd['success']} success, {sd['error']} error, {sd['unknown']} unknown")
+        summary = result["summary"]
+        print(f"Timeline: {summary['timeline_buckets']} buckets over {summary['span_hours']}h")
+    elif analyzer_name == "command-failure-summary":
+        for cmd_name, stats in result["commands"].items():
+            rate = f"{stats['failure_rate']:.1%}"
+            print(f"  {cmd_name}: {stats['execution_count']} executions, {rate} failure")
+    elif analyzer_name == "command-retry-success":
+        summary = result["summary"]
+        print(f"Found {summary['total_retry_sequences']} retry sequences")
+        if summary["most_retried_command"]:
+            print(f"Most retried command: {summary['most_retried_command']}")
+            print(f"Average retries to success: {summary['avg_retries_to_success']}")
+    elif analyzer_name == "command-duration":
+        durations = result["durations"]
+        if durations:
+            slowest = max(durations.items(), key=lambda x: x[1]["mean_seconds"])
+            fastest = min(durations.items(), key=lambda x: x[1]["mean_seconds"])
+            print(f"Slowest command: {slowest[0]} (avg: {slowest[1]['mean_seconds']}s)")
+            print(f"Fastest command: {fastest[0]} (avg: {fastest[1]['mean_seconds']}s)")
+    elif analyzer_name == "friction-score":
+        commands = result.get("commands", [])
+        print(f"Commands scored: {len(commands)}")
+        if commands:
+            top = commands[0]
+            print(
+                f"Top friction candidate: {top['command_name']} "
+                f"(score: {top['score']}, action: {top['recommended_action']})"
+            )
+    elif analyzer_name == "outlier-context":
+        outliers = result.get("outliers", [])
+        print(f"Enriched {len(outliers)} outlier(s) with context")
+        prec = result.get("aggregations", {}).get("most_common_preceding_command", {})
+        if prec:
+            top_prec = max(prec.items(), key=lambda x: x[1])
+            print(f"Most common preceding command: {top_prec[0]} ({top_prec[1]}x)")
+    elif analyzer_name == "callback-health":
+        summary = result.get("summary", {})
+        print(f"Callbacks: {summary.get('total_callbacks', 0)} total, "
+              f"{summary.get('healthy_count', 0)} healthy, "
+              f"{summary.get('degraded_count', 0)} degraded, "
+              f"{summary.get('dead_count', 0)} dead")
+    elif analyzer_name == "av-tracker":
+        summary = result.get("summary", {})
+        print(f"Scanned {summary.get('ps_tasks_scanned', 0)} ps result(s)")
+        print(f"Detections: {summary.get('detection_count', 0)} across {summary.get('callbacks_with_detections', 0)} callback(s)")
+        vendors = summary.get("vendors_detected", [])
+        if vendors:
+            print("Vendors detected: " + ", ".join(vendors))
+    elif analyzer_name == "dwell-time":
+        stats = result["global_statistics"]
+        print(f"Dwell measurements: {stats['dwell_count']}")
+        print(f"Mean dwell time: {stats['mean_seconds']}s")
+        print(f"P95 dwell time: {stats['p95_seconds']}s")
+        print(f"Max dwell time: {stats['max_seconds']}s")
+        print(f"Outliers detected: {stats['outlier_count']}")
+    elif analyzer_name == "parameter-entropy":
+        summary = result["summary"]
+        print(f"Total findings: {summary['total_findings']}")
+        print(f"Tasks with findings: {summary['tasks_with_findings']}")
+        for ftype, count in summary.get("by_type", {}).items():
+            print(f"  {ftype}: {count}")
+        if summary.get("repeated_high_entropy_tokens"):
+            print(f"Repeated high-entropy tokens: {summary['repeated_high_entropy_tokens']}")
+    elif analyzer_name == "argument-position-profile":
+        summary = result["summary"]
+        print(f"Commands profiled: {summary['commands_profiled']}")
+        print(f"Max argument depth: {summary['max_depth_observed']}")
+        print(f"Positions profiled: {summary['positions_profiled']}")
+        print(f"Findings: {summary['total_findings']}")
+        for ftype, count in summary.get("findings_by_type", {}).items():
+            print(f"  {ftype}: {count}")
+    elif analyzer_name == "tool-dump":
+        summary = result["summary"]
+        print(f"Groups defined: {summary['groups_defined']}")
+        print(f"Groups with matches: {summary['groups_with_matches']}")
+        print(f"Total matches: {summary['total_matches']}")
+        for group in result.get("groups", []):
+            if group.get("match_count", 0) == 0:
+                continue
+            dump_path = group.get("dump_path") or "<not written>"
+            print(f"  {group['name']}: {group['match_count']} match(es) -> {dump_path}")
 
 
 def find_previous_versions(
@@ -782,209 +986,21 @@ def run_analyze(
         bundle_metadata=bundle_metadata,
     )
 
-    # Common metadata section for all analyzers
-    analyzer_metadata = {
-        "analyzer": analyzer,
-        "metadata": {
-            "events_analyzed": len(task_events) + len(result_events),
-        },
-    }
-
-    # Enrich with operation metadata if available
-    for key in ("operation_id", "operation_name", "operation_slug",
-                "mythic_endpoint", "ghostwriter_endpoint",
-                "cobaltstrike_rest_endpoint", "outflank_log_path",
-                "analysis_version", "analysis_timestamp",
-                "janus_version"):
-        if key in bundle_metadata:
-            analyzer_metadata["metadata"][key] = bundle_metadata[key]
-
-    # Inject retention/privacy metadata
-    if retention_info.get("privacy_limited"):
-        analyzer_metadata["metadata"]["retention"] = {
-            "arguments_retained": retention_info["arguments_retained"],
-            "output_retained": retention_info["output_retained"],
-            "observed_arguments_rules": retention_info["observed_arguments_rules"],
-            "observed_output_rules": retention_info["observed_output_rules"],
-        }
-        pw = privacy_warnings_for_analyzer(analyzer, retention_info)
-        if pw:
-            analyzer_metadata["metadata"]["privacy_warnings"] = pw
-
-    if analyzer == "summary-visualization":
-        result = summary_visualization(task_events, result_events)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "summary_visualization.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        sd = result["status_distribution"]
-        print(f"Status: {sd['success']} success, {sd['error']} error, {sd['unknown']} unknown")
-        summary = result["summary"]
-        print(f"Timeline: {summary['timeline_buckets']} buckets over {summary['span_hours']}h")
-    elif analyzer == "command-failure-summary":
-        result = command_failure_summary(task_events, result_events)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "command_failure_summary.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        for cmd_name, stats in result["commands"].items():
-            rate = f"{stats['failure_rate']:.1%}"
-            print(f"  {cmd_name}: {stats['execution_count']} executions, {rate} failure")
-    elif analyzer == "command-retry-success":
-        result = command_retry_success(task_events, result_events)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "command_retry_success.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        summary = result["summary"]
-        print(f"Found {summary['total_retry_sequences']} retry sequences")
-        if summary["most_retried_command"]:
-            print(f"Most retried command: {summary['most_retried_command']}")
-            print(f"Average retries to success: {summary['avg_retries_to_success']}")
-    elif analyzer == "command-duration":
-        result = command_duration(task_events, result_events, analyzer_context)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "command_duration.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        durations = result["durations"]
-        if durations:
-            # Find slowest and fastest commands
-            slowest = max(durations.items(), key=lambda x: x[1]["mean_seconds"])
-            fastest = min(durations.items(), key=lambda x: x[1]["mean_seconds"])
-            print(f"Slowest command: {slowest[0]} (avg: {slowest[1]['mean_seconds']}s)")
-            print(f"Fastest command: {fastest[0]} (avg: {fastest[1]['mean_seconds']}s)")
-    elif analyzer == "friction-score":
-        result = friction_score(task_events, result_events, analyzer_context)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "friction-score.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        commands = result.get("commands", [])
-        print(f"Commands scored: {len(commands)}")
-        if commands:
-            top = commands[0]
-            print(
-                f"Top friction candidate: {top['command_name']} "
-                f"(score: {top['score']}, action: {top['recommended_action']})"
-            )
-    elif analyzer == "outlier-context":
-        result = outlier_context(task_events, result_events, analyzer_context)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "outlier_context_analysis.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        outliers = result.get("outliers", [])
-        print(f"Enriched {len(outliers)} outlier(s) with context")
-        agg = result.get("aggregations", {})
-        prec = agg.get("most_common_preceding_command", {})
-        if prec:
-            top_prec = max(prec.items(), key=lambda x: x[1])
-            print(f"Most common preceding command: {top_prec[0]} ({top_prec[1]}x)")
-    elif analyzer == "callback-health":
-        result = callback_health(task_events, result_events)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "callback_health.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        summary = result.get("summary", {})
-        print(f"Callbacks: {summary.get('total_callbacks', 0)} total, "
-              f"{summary.get('healthy_count', 0)} healthy, "
-              f"{summary.get('degraded_count', 0)} degraded, "
-              f"{summary.get('dead_count', 0)} dead")
-    elif analyzer == "av-tracker":
-        result = av_tracker(task_events, result_events)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "av_tracker.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        summary = result.get("summary", {})
-        print(f"Scanned {summary.get('ps_tasks_scanned', 0)} ps result(s)")
-        print(f"Detections: {summary.get('detection_count', 0)} across {summary.get('callbacks_with_detections', 0)} callback(s)")
-        vendors = summary.get("vendors_detected", [])
-        if vendors:
-            print("Vendors detected: " + ", ".join(vendors))
-    elif analyzer == "dwell-time":
-        result = dwell_time(task_events, result_events)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "dwell_time.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        stats = result["global_statistics"]
-        print(f"Dwell measurements: {stats['dwell_count']}")
-        print(f"Mean dwell time: {stats['mean_seconds']}s")
-        print(f"P95 dwell time: {stats['p95_seconds']}s")
-        print(f"Max dwell time: {stats['max_seconds']}s")
-        print(f"Outliers detected: {stats['outlier_count']}")
-    elif analyzer == "parameter-entropy":
-        result = parameter_entropy(task_events, result_events, analyzer_context)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "parameter_entropy.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        summary = result["summary"]
-        print(f"Total findings: {summary['total_findings']}")
-        print(f"Tasks with findings: {summary['tasks_with_findings']}")
-        for ftype, count in summary.get("by_type", {}).items():
-            print(f"  {ftype}: {count}")
-        if summary.get("repeated_high_entropy_tokens"):
-            print(f"Repeated high-entropy tokens: {summary['repeated_high_entropy_tokens']}")
-    elif analyzer == "argument-position-profile":
-        result = argument_position_profile(task_events, result_events, analyzer_context)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "argument_position_profile.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        summary = result["summary"]
-        print(f"Commands profiled: {summary['commands_profiled']}")
-        print(f"Max argument depth: {summary['max_depth_observed']}")
-        print(f"Positions profiled: {summary['positions_profiled']}")
-        print(f"Findings: {summary['total_findings']}")
-        for ftype, count in summary.get("findings_by_type", {}).items():
-            print(f"  {ftype}: {count}")
-    elif analyzer == "tool-dump":
-        result = tool_dump(task_events, result_events, analyzer_context)
-        result = _merge_common_metadata(result, analyzer_metadata)
-        out_path = out_dir / "tool_dump.json"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"Wrote: {out_path}")
-        summary = result["summary"]
-        print(f"Groups defined: {summary['groups_defined']}")
-        print(f"Groups with matches: {summary['groups_with_matches']}")
-        print(f"Total matches: {summary['total_matches']}")
-        for group in result.get("groups", []):
-            if group.get("match_count", 0) == 0:
-                continue
-            dump_path = group.get("dump_path") or "<not written>"
-            print(f"  {group['name']}: {group['match_count']} match(es) -> {dump_path}")
-    else:
+    if analyzer not in ANALYZER_SPECS:
         print(f"error: unknown analyzer: {analyzer}", file=sys.stderr)
         return 1
 
+    _run_analyzer_by_name(
+        analyzer,
+        task_events,
+        result_events,
+        out_dir,
+        analyzer_context,
+        bundle_metadata=bundle_metadata,
+        metadata_keys=SINGLE_ANALYZE_METADATA_KEYS,
+        retention_info=retention_info,
+        print_summary=True,
+    )
     return 0
 
 
@@ -1087,37 +1103,15 @@ def run_partial_load(
         with bundle_path.open(encoding="utf-8") as f:
             bundle_metadata = json.load(f)
 
-        analyzers_to_run = [
-            (name, ANALYZER_FUNCTIONS[name], ANALYZER_OUTPUTS[name])
-            for name in PARTIAL_LOAD_ANALYZERS
-        ]
-
-        for analyzer_name, analyzer_func, output_filename in analyzers_to_run:
-            print(f"  Running {analyzer_name}...")
-            try:
-                result = _run_analyzer(analyzer_name, analyzer_func, task_dicts, result_dicts, analyzer_context)
-
-                # Add common metadata
-                result = _merge_common_metadata(result, {
-                    "analyzer": analyzer_name,
-                    "metadata": {
-                        "events_analyzed": len(task_dicts) + len(result_dicts),
-                    },
-                })
-                
-
-                # Enrich with operation metadata
-                for key in ("operation_id", "operation_name", "operation_slug",
-                            "analysis_version", "analysis_timestamp", "janus_version"):
-                    if key in bundle_metadata:
-                        result["metadata"][key] = bundle_metadata[key]
-
-                out_path = target_dir / output_filename
-                with out_path.open("w", encoding="utf-8") as f:
-                    json.dump(result, f, indent=2, ensure_ascii=False)
-                print(f"    - {out_path}")
-            except Exception as e:
-                print(f"    ! Failed: {e}", file=sys.stderr)
+        _run_analyzer_set(
+            PARTIAL_LOAD_ANALYZERS,
+            task_dicts,
+            result_dicts,
+            target_dir,
+            analyzer_context,
+            bundle_metadata,
+            INGEST_ANALYZER_METADATA_KEYS,
+        )
 
         # Generate HTML report
         print("\nGenerating HTML report...")
@@ -1287,32 +1281,15 @@ def run_cobaltstrike_rest_load(
         bundle_path = target_dir / "bundle.json"
         with bundle_path.open(encoding="utf-8") as f:
             bundle_metadata = json.load(f)
-        analyzers_to_run = [
-            (name, ANALYZER_FUNCTIONS[name], ANALYZER_OUTPUTS[name])
-            for name in PARTIAL_LOAD_ANALYZERS
-        ]
-        for analyzer_name, analyzer_func, output_filename in analyzers_to_run:
-            print(f"  Running {analyzer_name}...")
-            try:
-                result = _run_analyzer(
-                    analyzer_name, analyzer_func, task_events, result_events, analyzer_context
-                )
-                result = _merge_common_metadata(result, {
-                    "analyzer": analyzer_name,
-                    "metadata": {
-                        "events_analyzed": len(task_events) + len(result_events),
-                    },
-                })
-                for key in ("operation_id", "operation_name", "operation_slug",
-                            "analysis_version", "analysis_timestamp", "janus_version"):
-                    if key in bundle_metadata:
-                        result["metadata"][key] = bundle_metadata[key]
-                out_path = target_dir / output_filename
-                with out_path.open("w", encoding="utf-8") as f:
-                    json.dump(result, f, indent=2, ensure_ascii=False)
-                print(f"    - {out_path}")
-            except Exception as e:
-                print(f"    ! Failed: {e}", file=sys.stderr)
+        _run_analyzer_set(
+            PARTIAL_LOAD_ANALYZERS,
+            task_events,
+            result_events,
+            target_dir,
+            analyzer_context,
+            bundle_metadata,
+            INGEST_ANALYZER_METADATA_KEYS,
+        )
 
         print("\nGenerating HTML report...")
         html_path = target_dir / "report.html"
@@ -1424,33 +1401,15 @@ def run_outflank_load(
         bundle_path = target_dir / "bundle.json"
         with bundle_path.open(encoding="utf-8") as f:
             bundle_metadata = json.load(f)
-        analyzers_to_run = [
-            (name, ANALYZER_FUNCTIONS[name], ANALYZER_OUTPUTS[name])
-            for name in PARTIAL_LOAD_ANALYZERS
-        ]
-        for analyzer_name, analyzer_func, output_filename in analyzers_to_run:
-            print(f"  Running {analyzer_name}...")
-            try:
-                result = _run_analyzer(
-                    analyzer_name, analyzer_func, task_events, result_events, analyzer_context
-                )
-                result = _merge_common_metadata(result, {
-                    "analyzer": analyzer_name,
-                    "metadata": {
-                        "events_analyzed": len(task_events) + len(result_events),
-                    },
-                })
-                for key in ("operation_id", "operation_name", "operation_slug",
-                            "analysis_version", "analysis_timestamp", "janus_version",
-                            "outflank_log_path"):
-                    if key in bundle_metadata:
-                        result["metadata"][key] = bundle_metadata[key]
-                out_path = target_dir / output_filename
-                with out_path.open("w", encoding="utf-8") as f:
-                    json.dump(result, f, indent=2, ensure_ascii=False)
-                print(f"    - {out_path}")
-            except Exception as e:
-                print(f"    ! Failed: {e}", file=sys.stderr)
+        _run_analyzer_set(
+            PARTIAL_LOAD_ANALYZERS,
+            task_events,
+            result_events,
+            target_dir,
+            analyzer_context,
+            bundle_metadata,
+            OUTFLANK_ANALYZER_METADATA_KEYS,
+        )
 
         print("\nGenerating HTML report...")
         html_path = target_dir / "report.html"
@@ -1676,39 +1635,17 @@ def run_multi_analyze(
         except Exception as e:
             print(f"warning: could not load bundle metadata: {e}", file=sys.stderr)
 
-    # Multi-operation analyzer set is defined in Config/analyzers.yml.
-    analyzers_to_run = [
-        (name, ANALYZER_FUNCTIONS[name], ANALYZER_OUTPUTS[name])
-        for name in MULTI_ANALYZE_ANALYZERS
-    ]
-
-    for analyzer_name, analyzer_func, output_filename in analyzers_to_run:
-        print(f"\n  Running {analyzer_name}...")
-        try:
-            result_data = _run_analyzer(analyzer_name, analyzer_func, task_events, result_events, analyzer_context)
-
-            # Add common metadata
-            result_data = _merge_common_metadata(result_data, {
-                "analyzer": analyzer_name,
-                "metadata": {
-                    "events_analyzed": len(task_events) + len(result_events),
-                },
-            })
-
-            # Enrich with operation metadata
-            for key in ("operation_name", "operation_slug", "operation_count",
-                        "analysis_timestamp", "janus_version", "source"):
-                if key in bundle_metadata:
-                    result_data["metadata"][key] = bundle_metadata[key]
-
-            out_path = output_dir / output_filename
-            with out_path.open("w", encoding="utf-8") as f:
-                json.dump(result_data, f, indent=2, ensure_ascii=False)
-            print(f"    - {out_path}")
-        except Exception as e:
-            print(f"    ! Failed: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc()
+    _run_analyzer_set(
+        MULTI_ANALYZE_ANALYZERS,
+        task_events,
+        result_events,
+        output_dir,
+        analyzer_context,
+        bundle_metadata,
+        MULTI_ANALYZE_METADATA_KEYS,
+        blank_line_before_each=True,
+        traceback_on_error=True,
+    )
 
     # Step 3: Generate HTML report
     print("\n" + "=" * 60)

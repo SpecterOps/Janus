@@ -14,7 +14,7 @@ import re
 from collections import defaultdict
 
 from Core.av_signature_registry import AVSignatureRegistry
-from Core.event_utils import task_key as _task_key
+from Core.event_utils import index_tasks_by_key, task_key as _task_key
 
 _PS_JSON_TEXT_KEYS = (
     "name",
@@ -110,9 +110,7 @@ def _search_corpus_for_ps_output(output_text: str) -> str:
 
 def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
     registry = AVSignatureRegistry.from_path()
-    task_by_id: dict[tuple[int, int], dict] = {}
-    for task in task_events:
-        task_by_id[_task_key(task)] = task
+    task_by_id = index_tasks_by_key(task_events)
 
     detection_groups: dict[tuple[int, int, str, tuple[str, ...]], dict] = {}
     vendor_hits: dict[str, dict] = {}

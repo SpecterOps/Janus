@@ -10,9 +10,9 @@ How much operator friction exists in this engagement?
 """
 
 import statistics
-from collections import defaultdict
 
 from Core.analyzer_command_grouping import analyzer_command_group
+from Core.event_utils import group_tasks_by_operation_sorted
 from Core.event_utils import percentile as _percentile
 from Core.event_utils import seconds_between as _time_diff_seconds
 from Core.output_rule import copy_task_retention_fields
@@ -29,7 +29,7 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
         Dict with analyzer name, metadata, and global dwell time statistics.
     """
     # Sort tasks chronologically within each operation.
-    ordered_by_operation = _group_and_sort_tasks(task_events)
+    ordered_by_operation = group_tasks_by_operation_sorted(task_events)
     events_analyzed = sum(len(tasks) for tasks in ordered_by_operation.values())
 
     if events_analyzed < 2:
@@ -93,34 +93,6 @@ def analyze(task_events: list[dict], result_events: list[dict]) -> dict:
         },
         "global_statistics": statistics_result,
     }
-
-
-def _group_and_sort_tasks(task_events: list[dict]) -> dict[int, list[dict]]:
-    """Group tasks by operation and sort each group by timestamp.
-
-    Args:
-        task_events: List of task event dicts.
-
-    Returns:
-        Mapping of operation_id -> tasks sorted chronologically by timestamp.
-
-    Raises:
-        ValueError: If any task has null or empty timestamp.
-    """
-    for t in task_events:
-        ts = t.get("timestamp")
-        if ts is None or ts == "":
-            raise ValueError(f"Task {t.get('task_id')} has null or empty timestamp")
-
-    grouped: dict[int, list[dict]] = defaultdict(list)
-    for t in task_events:
-        grouped[t.get("operation_id", 0)].append(t)
-
-    return {
-        operation_id: sorted(tasks, key=lambda e: e["timestamp"])
-        for operation_id, tasks in grouped.items()
-    }
-
 
 def _compute_statistics(dwells: list[dict]) -> dict:
     """Compute statistical summary for dwell times.
