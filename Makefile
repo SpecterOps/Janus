@@ -8,15 +8,11 @@ $(error Could not read version from pyproject.toml)
 endif
 CLI_LDFLAGS := -ldflags="-s -w -X main.version=$(JANUS_VERSION)"
 
-# Host OS from the Go toolchain — Windows needs .exe for PowerShell/cmd.
-GOHOSTOS := $(shell go env GOOS)
-ifeq ($(GOHOSTOS),windows)
-CLI_OUT := ../../janus-cli.exe
-else
-CLI_OUT := ../../janus-cli
-endif
+# Expanded only by the cli recipe, after check-go succeeds.
+GOHOSTOS = $(shell go env GOOS)
+CLI_OUT = ../../janus-cli$(if $(filter windows,$(GOHOSTOS)),.exe,)
 
-.PHONY: build test shell clean help cli cli-all
+.PHONY: build test shell clean help cli cli-all check-go
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -42,10 +38,18 @@ shell: build ## Open a shell in the container
 clean: ## Remove all versioned output directories and loose output files
 	rm -rf out/op-* out/latest out/latest.txt out/*.json out/*.ndjson out/*.html
 
-cli: ## Build the Go CLI binary for the current platform (janus-cli.exe on Windows)
+check-go:
+	@command -v go >/dev/null 2>&1 || { \
+		echo "error: Go was not found in PATH." >&2; \
+		echo "Install Go matching go.mod: https://go.dev/doc/install" >&2; \
+		echo "Reopen your terminal, verify 'go version', then retry." >&2; \
+		exit 1; \
+	}
+
+cli: check-go ## Build the Go CLI binary for the current platform (janus-cli.exe on Windows)
 	cd cmd/janus-cli && go build $(CLI_LDFLAGS) -o $(CLI_OUT) .
 
-cli-all: ## Cross-compile Go CLI for all platforms
+cli-all: check-go ## Cross-compile Go CLI for all platforms
 	cd cmd/janus-cli && GOOS=linux GOARCH=amd64 go build $(CLI_LDFLAGS) -o ../../dist/janus-cli-linux-amd64 .
 	cd cmd/janus-cli && GOOS=linux GOARCH=arm64 go build $(CLI_LDFLAGS) -o ../../dist/janus-cli-linux-arm64 .
 	cd cmd/janus-cli && GOOS=darwin GOARCH=amd64 go build $(CLI_LDFLAGS) -o ../../dist/janus-cli-darwin-amd64 .

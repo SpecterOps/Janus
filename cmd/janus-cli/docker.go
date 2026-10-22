@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,7 +99,7 @@ func buildDockerRunPrefixes(cliNetwork, cliAddHost string, cfg *Config) []string
 }
 
 func ensureDockerAvailable() error {
-	cmd := exec.Command("docker", "info", "--format", "{{.ServerVersion}}")
+	cmd := dockerCommand("docker", "info", "--format", "{{.ServerVersion}}")
 	var combined bytes.Buffer
 	cmd.Stdout = &combined
 	cmd.Stderr = &combined
@@ -120,7 +119,7 @@ func wrapDockerConnectivityError(err error, details string) error {
 			strings.Contains(lower, "docker api") ||
 			strings.Contains(lower, "docker daemon socket")) {
 		return fmt.Errorf(
-			"cannot access the Docker socket (permission denied). On Linux with Docker Engine: add your user to the docker group (sudo usermod -aG docker \"$USER\"), then log out and back in or run newgrp docker, and confirm docker info works without sudo. On macOS/Windows use Docker Desktop and ensure it is running. Avoid running janus-cli with sudo (it can leave root-owned files under out/). Details: %s",
+			"cannot access the Docker socket (permission denied).\nOn Linux with Docker Engine: sudo usermod -aG docker \"$USER\"\nThen log out and back in, or run newgrp docker.\nVerify docker info works without sudo; running docker alone only shows help.\nOn macOS/Windows, start Docker Desktop.\nRun janus-cli without sudo to avoid root-owned files under out/.\nDetails: %s",
 			details,
 		)
 	}
@@ -175,29 +174,35 @@ func runWithProgressHint(msg string, fn func() error) error {
 	return err
 }
 
+// dockerCommand is replaceable by tests so prerequisite failures need no daemon.
+var dockerCommand = exec.Command
+
+func ensureDockerBuildxAvailable() error {
+	output, err := dockerCommand("docker", "buildx", "version").CombinedOutput()
+	if err != nil {
+		return dockerBuildxError(err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func dockerBuildxError(err error, details string) error {
+	return fmt.Errorf("Docker Buildx is missing or broken. Install or repair the Buildx component: https://docs.docker.com/go/buildx/\nVerify docker info and docker buildx version work as your normal user, then retry Janus without sudo.\nDetails: %s: %w", details, err)
+}
+
 func buildImage() error {
 	if err := ensureDockerAvailable(); err != nil {
 		return err
 	}
+	if err := ensureDockerBuildxAvailable(); err != nil {
+		return err
+	}
 	err := runWithProgressHint("Docker: building image (quiet; please wait)", func() error {
-		if err := runDockerBuildAttempt([]string{"build", "--network=host", "--progress=quiet", "-t", imageName, "."}); err == nil {
-			return nil
+		err := runDockerBuildAttempt([]string{"build", "--network=host", "--progress=quiet", "-t", imageName, "."})
+		// Retry only when the quiet-progress option itself was rejected.
+		if err != nil && unsupportedQuietProgress(err.Error()) {
+			return runDockerBuildAttempt([]string{"build", "--network=host", "-q", "-t", imageName, "."})
 		}
-		// Fallback for Docker versions that do not support --progress=quiet.
-		if err := runDockerBuildAttempt([]string{"build", "--network=host", "-q", "-t", imageName, "."}); err == nil {
-			return nil
-		}
-		// Final fallback: run verbosely so users can see real build errors.
-		verbose := exec.Command("docker", "build", "--network=host", "-t", imageName, ".")
-		verbose.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
-		verbose.Stdout = os.Stdout
-		var verboseErr bytes.Buffer
-		verbose.Stderr = io.MultiWriter(os.Stderr, &verboseErr)
-		_, _ = fmt.Fprintln(os.Stderr, "Docker: build failed in quiet mode; showing verbose logs...")
-		if err := verbose.Run(); err != nil {
-			return wrapDockerBuildError(err, verboseErr.String())
-		}
-		return nil
+		return err
 	})
 	if err != nil {
 		return err
@@ -206,11 +211,25 @@ func buildImage() error {
 	return nil
 }
 
+func unsupportedQuietProgress(details string) bool {
+	lower := strings.ToLower(details)
+	return (strings.Contains(lower, "unknown flag: --progress") ||
+		strings.Contains(lower, "unknown flag: progress") ||
+		(strings.Contains(lower, "invalid progress") && strings.Contains(lower, "quiet"))) &&
+		!strings.Contains(lower, "buildx")
+}
+
 func wrapDockerBuildError(err error, details string) error {
-	if hint := dockerCredentialHint(details); hint != "" {
-		return fmt.Errorf("docker build failed: %w. %s", err, hint)
+	lower := strings.ToLower(details)
+	if strings.Contains(lower, "buildx") &&
+		(strings.Contains(lower, "missing") || strings.Contains(lower, "broken") ||
+			strings.Contains(lower, "not found") || strings.Contains(lower, "not a docker command")) {
+		return dockerBuildxError(err, details)
 	}
-	return err
+	if hint := dockerCredentialHint(details); hint != "" {
+		return fmt.Errorf("docker build failed: %w. %s\nDetails: %s", err, hint, details)
+	}
+	return fmt.Errorf("docker build failed: %w\nDetails: %s", err, details)
 }
 
 func dockerCredentialHint(details string) string {
@@ -228,16 +247,16 @@ func dockerCredentialHint(details string) string {
 }
 
 func runDockerBuildAttempt(args []string) error {
-	cmd := exec.Command("docker", args...)
+	cmd := dockerCommand("docker", args...)
 	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
 
 	// Keep successful builds fully quiet so callers always get the same progress UX.
 	var combined bytes.Buffer
-	cmd.Stdout = io.Discard
+	cmd.Stdout = &combined
 	cmd.Stderr = &combined
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(combined.String()))
+		return wrapDockerBuildError(err, strings.TrimSpace(combined.String()))
 	}
 	return nil
 }
@@ -291,7 +310,7 @@ func dockerRun(args []string, interactive bool, cliDockerNetwork, cliDockerAddHo
 	}
 	fmt.Fprintf(os.Stderr, "Docker: starting container (%s) — output below\n", phase)
 
-	cmd := exec.Command("docker", cmdArgs...)
+	cmd := dockerCommand("docker", cmdArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
