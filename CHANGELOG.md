@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- CLI source builds now explain missing Go before invoking the toolchain, while unrelated Make targets work without Go.
+- Docker image builds check Buildx availability and provide actionable repair guidance. Failed builds preserve diagnostics without repeated attempts, except when retrying an unsupported quiet-progress option.
+- Docker socket permission errors now show readable recovery steps and explain how to verify daemon access without sudo.
+
 ## [1.2.0] - 2026-06-23
 
 ### Added

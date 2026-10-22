@@ -6,7 +6,9 @@
 
 ## Quick Start
 
-Requires [Docker](https://www.docker.com/) and the `janus-cli` binary built for your operating system.
+Requires [Docker](https://www.docker.com/) with a working Buildx component and daemon access as your normal user. Verify `docker info` and `docker buildx version` before running Janus.
+
+Building the CLI from source also requires Go matching the version in `go.mod` (currently Go 1.22 or newer) and `make`. [Install Go](https://go.dev/doc/install), reopen your terminal, and verify `go version`. Alternatively, download the binary for your operating system from [Releases](https://github.com/SpecterOps/Janus/releases) and place it in the repository root; Go is only needed for source builds.
 
 ```bash
 git clone https://github.com/SpecterOps/Janus/ && cd Janus

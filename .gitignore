@@ -4,8 +4,8 @@ build/
 *.egg-info/
 
 # Compiled binaries (distributed via Releases)
-janus-cli
-janus-cli.exe
+/janus-cli
+/janus-cli.exe
 janus-cli-linux-amd64
 janus-cli-linux-arm64
 janus-cli-darwin-amd64

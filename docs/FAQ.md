@@ -4,9 +4,13 @@ Short fixes for issues hit while setting up and running Janus.
 
 ## Build and CLI
 
-### `go` is not recognized
+### Go is missing or not on `PATH`
 
-Go is installed, but its `bin` directory is not on `PATH`.
+If `make cli` or `make cli-all` reports "Go was not found in PATH", either Go is not installed or its `bin` directory is missing from `PATH`. Install Go matching `go.mod` (currently Go 1.22 or newer) using the [official instructions](https://go.dev/doc/install), reopen your terminal, and verify `go version` before retrying.
+
+You can also download a platform binary from [Releases](https://github.com/SpecterOps/Janus/releases) and place it in the repository root; running a prebuilt CLI does not require Go.
+
+If Go is already installed on Windows at the default location, update the current PowerShell session:
 
 ```powershell
 $env:PATH += ";C:\Program Files\Go\bin"
@@ -63,9 +67,17 @@ $env:GONOSUMCHECK = "*"
 
 Start Docker Desktop, wait for the engine to come up, then retry the command.
 
+### Docker Buildx is missing or broken
+
+Janus image builds use BuildKit and require a working Buildx component. If the preflight or build reports missing/broken Buildx, [install or repair Buildx](https://docs.docker.com/go/buildx/) for your Docker installation. Docker Desktop users should ensure their installation is up to date and running.
+
+Verify `docker info` and `docker buildx version` as your normal user, then retry `./janus-cli run` without `sudo`. Janus stops before building when the Buildx check fails; it does not switch to the legacy builder. `--no-build` skips the Buildx check when using an existing Janus image, but still requires daemon access.
+
 ### Docker socket permission denied
 
 This usually appears on **Linux** with Docker Engine when your user can run `docker` but is not in the `docker` group, or you added the group but have not started a new login session yet. The error often mentions permission denied while connecting to the Docker API and paths such as `/var/run/docker.sock`.
+
+Running bare `docker` only displays help; it does not verify daemon access.
 
 Fix:
 
