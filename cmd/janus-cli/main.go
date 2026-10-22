@@ -10,7 +10,7 @@ import (
 
 // version is set at build time via -ldflags "-X main.version=v1.2.3" (e.g. GitHub release workflow).
 // Default should match [project].version in pyproject.toml (bundles use get_janus_version()).
-var version = "1.1.0"
+var version = "1.2.1"
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `janus-cli — Janus operator CLI
